@@ -4535,8 +4535,204 @@ class PlexClient
 
   @override
   Future<List<MediaHub>> fetchRelatedHubs(String id, {int count = 10}) async {
-    final hubs = await _getRelatedHubs(id, count: count);
-    return hubs.map((h) => PlexMappers.mediaHub(h)).toList();
+    final hubs = (await _getRelatedHubs(id, count: count)).map((h) => PlexMappers.mediaHub(h)).toList();
+    try {
+      return await _withEditionsAndCollections(id, hubs);
+    } catch (e, st) {
+      appLogger.e('Failed to add editions/collections to related hubs', error: e, stackTrace: st);
+      return hubs;
+    }
+  }
+
+  // --- Editions row and one row per collection --------------------------------
+
+  /// Raw collection rows per library section, kept briefly: every detail
+  /// screen asks for them.
+  final Map<String, ({DateTime at, List<Map<String, dynamic>> rows})> _collectionRowsCache = {};
+
+  Future<List<Map<String, dynamic>>> _cachedLibraryCollections(String sectionId) async {
+    final cached = _collectionRowsCache[sectionId];
+    if (cached != null && DateTime.now().difference(cached.at) < const Duration(minutes: 5)) return cached.rows;
+    final rows = await _libraryCollectionsJson(sectionId);
+    _collectionRowsCache[sectionId] = (at: DateTime.now(), rows: rows);
+    return rows;
+  }
+
+  /// All editions of a movie: the items of its library with the same guid.
+  /// Standard (no edition) first, the rest in server order.
+  Future<List<MediaItem>> _movieEditions(PlexMediaItem item) async {
+    final guid = item.guid;
+    final title = item.title;
+    final sectionId = item.libraryId;
+    if (item.kind != MediaKind.movie || guid == null || title == null || sectionId == null) return const [];
+    final result = await _fetchPaginatedList(
+      '/library/sections/$sectionId/all',
+      queryParameters: {'type': 1, 'title': title},
+      librarySectionID: int.tryParse(sectionId),
+      librarySectionTitle: item.libraryTitle,
+    );
+    final editions = [
+      for (final dto in result.items)
+        if (dto.guid == guid) PlexMappers.mediaItem(dto),
+    ];
+    return [...editions.where((e) => e.editionTitle == null), ...editions.where((e) => e.editionTitle != null)];
+  }
+
+  /// [hubs] with an editions row in front (when the movie has more than one
+  /// edition) and one row for each manual collection of the item, each
+  /// followed by the manual collections of the same name in the other
+  /// libraries. These replace the server's collection rows; a collection
+  /// holding only the item or exactly the movie's editions is dropped.
+  Future<List<MediaHub>> _withEditionsAndCollections(String id, List<MediaHub> hubs) async {
+    final item = await fetchItem(id);
+    if (item is! PlexMediaItem) return hubs;
+    final ownSection = item.libraryId;
+
+    final editions = await _movieEditions(item);
+    final editionIds = editions.length > 1 ? {for (final e in editions) e.id} : const <String>{};
+
+    // The item's manual collections and their namesakes elsewhere, as groups.
+    final tags = {for (final tag in item.collections ?? const <String>[]) tag.toLowerCase()};
+    final groups = <List<({Map<String, dynamic> row, PlexLibraryDto library})>>[];
+    if (tags.isNotEmpty && ownSection != null) {
+      bool manual(Map<String, dynamic> row) {
+        final smart = row['smart'];
+        return !(smart == true || smart == 1 || smart == '1');
+      }
+
+      String titleOf(Map<String, dynamic> row) => (row['title'] ?? '').toString().toLowerCase();
+      final libraries = (await _getLibraries()).where((l) => l.type == 'movie' || l.type == 'show').toList();
+      final rowsByLibrary = await Future.wait(
+        libraries.map(
+          (l) => _cachedLibraryCollections(l.key).then(
+            (rows) => [
+              for (final row in rows)
+                if (manual(row) && tags.contains(titleOf(row))) (row: row, library: l),
+            ],
+            onError: (_) => <({Map<String, dynamic> row, PlexLibraryDto library})>[],
+          ),
+        ),
+      );
+      final all = rowsByLibrary.expand((rows) => rows).toList();
+      final own = all.where((c) => c.library.key == ownSection);
+      for (final main in own) {
+        groups.add([
+          main,
+          ...all.where((c) => c.library.key != ownSection && titleOf(c.row) == titleOf(main.row)),
+        ]);
+      }
+    }
+
+    // Rows per group; the groups are sorted below by the loaded size of
+    // their own collection (the list's childCount can lag behind).
+    final groupHubs = <({int size, String title, List<MediaHub> hubs})>[];
+    final used = <String>{};
+    for (final group in groups) {
+      final hubsOfGroup = <MediaHub>[];
+      var groupSize = flexibleInt(group.first.row['childCount']) ?? 0;
+      for (final (index, c) in group.indexed) {
+        final cid = c.row['ratingKey']?.toString();
+        if (cid == null || !used.add(cid)) continue;
+        final childCount = flexibleInt(c.row['childCount']);
+        if (index == 0 && childCount != null) {
+          // The item's own collection: skip it when it holds only the item,
+          // or exactly the movie's editions (the editions row shows those).
+          if (childCount <= 1) continue;
+          if (editionIds.isNotEmpty && childCount == editionIds.length) {
+            final members = await fetchCollectionPage(cid, start: 0, size: childCount);
+            if (members.items.every((m) => editionIds.contains(m.id))) continue;
+          }
+        }
+        final LibraryPage<MediaItem> page;
+        try {
+          page = await fetchCollectionPage(
+            cid,
+            start: 0,
+            size: 50,
+            libraryId: c.library.key,
+            libraryTitle: c.library.title,
+          );
+        } catch (e) {
+          appLogger.w('Failed to load collection $cid: $e');
+          continue;
+        }
+        final title = (c.row['title'] ?? '').toString();
+        final kinds = page.items.map((m) => m.kind).toSet();
+        final hub = MediaHub(
+          id: '/library/collections/$cid/children',
+          identifier: 'plezy.collection',
+          title: index == 0 ? title : '$title <${c.library.title}>',
+          type: kinds.length != 1
+              ? 'mixed'
+              : kinds.first == MediaKind.show
+              ? 'show'
+              : 'movie',
+          items: page.items,
+          size: page.totalCount,
+          more: page.totalCount > page.items.length,
+          libraryId: c.library.key,
+          serverId: serverId,
+          serverName: serverName,
+        );
+        if (index == 0) groupSize = page.totalCount;
+        if (hub.items.isNotEmpty) hubsOfGroup.add(hub);
+      }
+      if (hubsOfGroup.isNotEmpty) {
+        groupHubs.add((size: groupSize, title: (group.first.row['title'] ?? '').toString(), hubs: hubsOfGroup));
+      }
+    }
+    // Smallest collection first; equal size: longer (more specific) name
+    // first, e.g. "Batman [2021]" before "Batman". Namesakes from other
+    // libraries stay right behind their collection.
+    groupHubs.sort((a, b) {
+      final bySize = a.size.compareTo(b.size);
+      return bySize != 0 ? bySize : b.title.length.compareTo(a.title.length);
+    });
+    final collectionHubs = [for (final g in groupHubs) ...g.hubs];
+
+    // The server's own collection rows are replaced by the rows built above:
+    // they would duplicate them and ignore the rules for single-item and
+    // editions-only collections. The collection block sits where the server
+    // put its first collection row, or right after the editions.
+    final result = <MediaHub>[];
+    if (editionIds.isNotEmpty) {
+      result.add(
+        MediaHub(
+          id: 'plezy.editions.$id',
+          identifier: editionsHubIdentifier,
+          title: LocaleSettings.currentLocale == AppLocale.de ? 'Editionen' : 'Editions',
+          type: 'movie',
+          items: [
+            for (final e in editions)
+              if (e is PlexMediaItem) e.copyWith(title: e.editionTitle ?? '<Standard>', editionTitle: null) else e,
+          ],
+          size: editions.length,
+          serverId: serverId,
+          serverName: serverName,
+        ),
+      );
+    }
+    bool isServerCollectionHub(MediaHub hub) {
+      final identifier = hub.identifier?.toLowerCase() ?? '';
+      final key = hub.id.toLowerCase();
+      final title = hub.title.toLowerCase();
+      return identifier.contains('collection') ||
+          key.contains('collection') ||
+          tags.any((tag) => RegExp('(^|\\W)${RegExp.escape(tag)}(\\W|\$)').hasMatch(title)) ||
+          hub.items.any((m) => m.kind == MediaKind.collection);
+    }
+
+    var placed = false;
+    for (final hub in hubs) {
+      if (!isServerCollectionHub(hub)) {
+        result.add(hub);
+      } else if (!placed) {
+        placed = true;
+        result.addAll(collectionHubs);
+      }
+    }
+    if (!placed) result.insertAll(editionIds.isNotEmpty ? 1 : 0, collectionHubs);
+    return result;
   }
 
   @override

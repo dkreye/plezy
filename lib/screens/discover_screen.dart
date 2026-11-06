@@ -1531,6 +1531,7 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                                   if (heroItem.rating != null) '★ ${formatRating(heroItem.rating!)}',
                                   if (heroItem.contentRating != null) formatContentRating(heroItem.contentRating!),
                                   if (heroItem.year != null) heroItem.year.toString(),
+                                  ?heroItem.editionTitle,
                                 ].join(' • '),
                                 style: TextStyle(
                                   color: colorScheme.onSurface,

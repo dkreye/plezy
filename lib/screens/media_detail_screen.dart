@@ -1266,7 +1266,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   /// mirroring [FittedMetadataLine]'s policy — instead of wrapping onto a
   /// second run that short heroes clip away entirely: the scores pill sheds
   /// one badge at a time from the end, then quality labels go rightmost-first,
-  /// then the Plex edition, certification, runtime, and finally the year. The
+  /// then certification, runtime, and finally the year and the Plex edition. The
   /// tappable user-rating chip is the strip's only interactive element and is
   /// never dropped.
   ///
@@ -1323,7 +1323,6 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
     if (!scoresOnly) {
       if (metadata.year != null) addTextChip('${metadata.year}', 0);
-      if (metadata case PlexMediaItem(:final editionTitle?)) addTextChip(editionTitle, 3);
       if (metadata.contentRating != null) addTextChip(formatContentRating(metadata.contentRating!), 2);
       if (metadata.durationMs != null) addTextChip(formatDurationTextual(metadata.durationMs!), 1);
       for (final label in buildMediaQualityLabels(metadata)) {
@@ -1369,6 +1368,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
           ),
         ),
       ));
+    }
+    // The Plex edition closes the strip, after the scores; shed last.
+    if (!scoresOnly) {
+      if (metadata case PlexMediaItem(:final editionTitle?)) addTextChip(editionTitle, 0);
     }
 
     // The user-rating chip always survives, but its width still counts
@@ -4113,8 +4116,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }
 
   /// The ordered metadata fields the TV detail line renders and its announcement
-  /// reads: year first (the desktop hero's chip order) and every score in one
-  /// trailing slot. Drop priorities let the fitted line shed surplus rating
+  /// reads: year first (the desktop hero's chip order), every score in one
+  /// slot, and the Plex edition last. Drop priorities let the fitted line shed surplus rating
   /// badges before the fields that identify the item (#1893). Stream quality
   /// labels stay off the hero line: they describe the file, not the title,
   /// and remain on the rail cards and in the details sheet (#2217).
@@ -4142,6 +4145,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     // An episode without scores of its own shows the title's.
     final ratings = episodeRatings.isNotEmpty ? episodeRatings : _titleRatings(metadata);
     if (ratings.isNotEmpty) parts.add(MetadataLineRatings(ratings, dropPriority: 4));
+    // The Plex edition closes the line, after the scores.
+    if (!lineMetadata.isEpisode && lineMetadata.editionTitle != null) {
+      parts.add(MetadataLineText(lineMetadata.editionTitle!, dropPriority: 0));
+    }
 
     return parts;
   }
@@ -4426,6 +4433,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         );
       }
     }
+    // The editions row leads the rows below the hero, ahead of the cast.
+    hubs.addAll(_relatedHubs.where((hub) => hub.identifier == editionsHubIdentifier && hub.items.isNotEmpty));
     final actors = _tvDetailActorItems(metadata);
     if (actors.isNotEmpty) {
       hubs.add(
@@ -4443,7 +4452,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         ),
       );
     }
-    hubs.addAll(_relatedHubs.where((hub) => hub.items.isNotEmpty));
+    hubs.addAll(_relatedHubs.where((hub) => hub.identifier != editionsHubIdentifier && hub.items.isNotEmpty));
     return hubs;
   }
 

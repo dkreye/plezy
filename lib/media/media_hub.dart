@@ -1,5 +1,8 @@
 import 'media_item.dart';
 
+/// [MediaHub.identifier] of the related row listing a movie's editions.
+const editionsHubIdentifier = 'plezy.editions';
+
 /// A named, ordered list of items grouped on the home screen (Plex `Hub`,
 /// or a synthesized Jellyfin "Latest"/"Resume"/"NextUp" row).
 class MediaHub {

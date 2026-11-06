@@ -201,6 +201,7 @@ class _FolderTreeItemState extends State<FolderTreeItem> with ContextMenuTapMixi
     if (item.year != null) {
       parts.add(item.year.toString());
     }
+    if (item.editionTitle case final edition?) parts.add(edition);
     if (item.durationMs != null && item.durationMs! > 0) {
       parts.add(formatDurationTextual(item.durationMs!));
     }
