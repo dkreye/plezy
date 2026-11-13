@@ -32,6 +32,7 @@ import '../utils/media_image_helper.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/formatters.dart';
+import 'star_tinted_text.dart';
 import '../utils/media_navigation_helper.dart';
 import '../utils/snackbar_helper.dart';
 import '../theme/mono_tokens.dart';
@@ -99,6 +100,12 @@ String _buildMediaMetadataLine(MediaItem item, {CatalogItem? catalogItem, bool c
   }
 
   String? ratingPart() {
+    // Plezy+: library items show the viewer's own rating (0-10) instead of
+    // the listing's unattributed score; catalog entries keep their source's.
+    if (catalogItem == null) {
+      final own = item.userRating;
+      return own != null && own > 0 ? '${formatRating(own)}★' : null;
+    }
     if (item.rating case final rating?) {
       final votes = compact ? null : catalogItem?.votes;
       final voteSuffix = votes != null && votes > 0 ? ' (${_formatCompactCatalogNumber(votes)})' : '';
@@ -949,8 +956,10 @@ class _MediaCardList extends StatelessWidget {
                     const SizedBox(height: 4),
                     if (metadataLine.isNotEmpty) ...[
                       ExcludeSemantics(
-                        child: Text(
-                          metadataLine,
+                        // Plezy+: the own-rating star in amber (library items only;
+                        // catalog entries show their source's score).
+                        child: Text.rich(
+                          catalogItem == null ? starTintedSpan(metadataLine) : TextSpan(text: metadataLine),
                           maxLines: 1,
                           overflow: .ellipsis,
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(

@@ -14,6 +14,7 @@ import '../../mixins/context_menu_tap_mixin.dart';
 import '../../services/settings_service.dart';
 import '../../widgets/settings_builder.dart';
 import '../../utils/formatters.dart';
+import '../../widgets/star_tinted_text.dart';
 import '../../utils/focus_utils.dart';
 import '../../utils/provider_extensions.dart';
 import '../../widgets/app_menu.dart';
@@ -201,11 +202,13 @@ class _FolderTreeItemState extends State<FolderTreeItem> with ContextMenuTapMixi
     if (item.year != null) {
       parts.add(item.year.toString());
     }
+    if (item.editionTitle case final edition?) parts.add(edition);
     if (item.durationMs != null && item.durationMs! > 0) {
       parts.add(formatDurationTextual(item.durationMs!));
     }
-    if (item.rating != null) {
-      parts.add('★ ${item.rating!.toStringAsFixed(1)}');
+    // Plezy+: the viewer's own rating (0-10) instead of the unattributed score.
+    if ((item.userRating ?? 0) > 0) {
+      parts.add('★ ${formatRating(item.userRating!)}');
     }
 
     return parts.join(' · ');
@@ -311,8 +314,8 @@ class _FolderTreeItemState extends State<FolderTreeItem> with ContextMenuTapMixi
                 ],
                 if (metadataLine.isNotEmpty) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    metadataLine,
+                  Text.rich(
+                    starTintedSpan(metadataLine),
                     style: TextStyle(
                       fontSize: 10,
                       color: tokens(context).textMuted.withValues(alpha: 0.7),

@@ -242,6 +242,22 @@ mixin _PlexCollectionMethods on _PlexClientInternals {
     int? size,
     AbortController? abort,
   }) async {
+    // Plezy+: one filmography across all role tags of the person.
+    List<PlexMetadataDto>? merged;
+    try {
+      merged = await _mergedPersonMedia(personId, refresh: (start ?? 0) == 0, abort: abort);
+    } catch (e, st) {
+      appLogger.w('Plezy+: merging person roles failed', error: e, stackTrace: st);
+    }
+    if (merged != null) {
+      final offset = (start ?? 0).clamp(0, merged.length);
+      final end = size == null ? merged.length : (offset + size).clamp(offset, merged.length);
+      return LibraryPage<MediaItem>(
+        items: merged.sublist(offset, end).map(PlexMappers.mediaItem).toList(),
+        totalCount: merged.length,
+        offset: offset,
+      );
+    }
     final result = await _getPersonMedia(personId, start: start, size: size, abort: abort);
     return LibraryPage<MediaItem>(
       items: result.items.map(PlexMappers.mediaItem).toList(),
@@ -250,12 +266,312 @@ mixin _PlexCollectionMethods on _PlexClientInternals {
     );
   }
 
+  Future<List<PlexLibraryDto>> _getLibraries();
+
+  /// Plezy+: merged media per person id, refreshed when the first page loads.
+  final Map<String, Future<List<PlexMetadataDto>?>> _plezyPersonMedia = {};
+
+  /// Plezy+: writer/producer listings per section, kept for 30 minutes.
+  final Map<String, (DateTime, Future<List<Map<String, dynamic>>>)> _plezyRoleLists = {};
+
+  Future<List<PlexMetadataDto>?> _mergedPersonMedia(String personId, {required bool refresh, AbortController? abort}) {
+    final cached = _plezyPersonMedia[personId];
+    if (cached != null && !refresh) return cached;
+    final future = _loadMergedPersonMedia(personId, abort: abort);
+    _plezyPersonMedia[personId] = future;
+    future.catchError((_) {
+      _plezyPersonMedia.remove(personId);
+      return null;
+    });
+    return future;
+  }
+
+  /// All tag ids of the person: actor and director via the search index
+  /// (same plex.tv `tagKey`), writer and producer via the section listings
+  /// (same name and photo; those carry no `tagKey`). Null when the person
+  /// has no name, so the caller keeps the server's own list.
+  Future<List<PlexMetadataDto>?> _loadMergedPersonMedia(String personId, {AbortController? abort}) async {
+    final tagResponse = await _getWithFailover('/library/people/$personId', abort: abort);
+    final person = firstFlexibleMap(_getMediaContainer(tagResponse)?['Directory']);
+    final name = (person?['tag'] ?? person?['title'])?.toString().trim() ?? '';
+    if (name.isEmpty) return null;
+    var tagKey = person?['tagKey']?.toString() ?? '';
+    var thumb = person?['thumb']?.toString() ?? '';
+    if (tagKey.isEmpty) {
+      // .nfo person: borrow the identity of the namesake the agents matched.
+      final namesake = await _plezyNamesake(
+        name,
+        selfId: personId,
+      ).catchError((_) => (thumb: null, tagKey: null));
+      tagKey = namesake.tagKey ?? '';
+      if (thumb.isEmpty) thumb = namesake.thumb ?? '';
+    }
+    bool samePhoto(Object? other) {
+      final o = other?.toString() ?? '';
+      return thumb.isEmpty || o.isEmpty || o == thumb;
+    }
+
+    final ids = <String>{personId};
+
+    Future<void> fromSearch() async {
+      final response = await _getWithFailover('/hubs/search', queryParameters: {'query': name, 'searchTypes': 'people', 'limit': 50}, abort: abort);
+      final hubs = _getMediaContainer(response)?['Hub'];
+      if (hubs is! List) return;
+      for (final hub in hubs) {
+        if (hub is! Map) continue;
+        for (final list in [hub['Directory'], hub['Metadata']]) {
+          for (final entry in flexibleMapList(list)) {
+            if (entry['type'] != 'tag') continue;
+            final id = entry['id']?.toString() ?? '';
+            if (id.isEmpty) continue;
+            final key = entry['tagKey']?.toString() ?? '';
+            final match = tagKey.isNotEmpty && key.isNotEmpty
+                ? key == tagKey
+                : entry['tag']?.toString().trim() == name && samePhoto(entry['thumb']);
+            if (match) ids.add(id);
+          }
+        }
+      }
+    }
+
+    Future<void> fromRoleLists() async {
+      final sections = (await _getLibraries()).where((l) => l.type == 'movie' || l.type == 'show');
+      final lists = await Future.wait([
+        for (final section in sections)
+          for (final role in const ['writer', 'producer'])
+            _plezyRoleList(section.key, role, abort).catchError((_) => <Map<String, dynamic>>[]),
+      ]);
+      for (final list in lists) {
+        for (final entry in list) {
+          if (entry['title']?.toString().trim() != name || !samePhoto(entry['thumb'])) continue;
+          final id = entry['key']?.toString() ?? '';
+          if (id.isNotEmpty && !id.contains('/')) ids.add(id);
+        }
+      }
+    }
+
+    await Future.wait([
+      fromSearch().catchError((Object e) => appLogger.w('Plezy+: person search failed', error: e)),
+      fromRoleLists().catchError((Object e) => appLogger.w('Plezy+: role lists failed', error: e)),
+    ]);
+
+    final results = await Future.wait([
+      for (final id in ids)
+        id == personId
+            ? _getPersonMedia(id, abort: abort)
+            : _getPersonMedia(id, abort: abort).catchError((_) => const _LibraryContentResult(items: [], totalSize: 0)),
+    ]);
+    final seen = <String>{};
+    final merged = [
+      for (final result in results)
+        for (final item in result.items)
+          if (seen.add(item.ratingKey)) item,
+    ];
+    // Newest year first, alphabetical within a year (the card shows only the year).
+    int year(PlexMetadataDto m) => m.year ?? int.tryParse((m.originallyAvailableAt ?? '').split('-').first) ?? 0;
+    merged.sort((a, b) {
+      final byYear = year(b).compareTo(year(a));
+      if (byYear != 0) return byYear;
+      return (a.titleSort ?? a.title ?? '').toLowerCase().compareTo((b.titleSort ?? b.title ?? '').toLowerCase());
+    });
+    return merged;
+  }
+
+  /// Plezy+: photo and plex.tv id of a person's matched namesake, per name.
+  final Map<String, Future<({String? thumb, String? tagKey})>> _plezyNamesakes = {};
+
+  /// Plezy+: people from local .nfo files are plain tags without photo or
+  /// plex.tv id. Takes both from the tags of the same name the metadata
+  /// agents matched, found by search (actor, director). Plex keeps one tag
+  /// per library, and different people can share a name, so the choice is:
+  /// 1. a single tagKey among the namesakes in the same library
+  ///    ([sectionId], or the library of the tag [selfId]);
+  /// 2. else a single tagKey among all namesakes that have a photo;
+  /// 3. else a single tagKey among all namesakes.
+  /// Without any tagKey only an unambiguous photo is taken. With
+  /// [roleLists], writer and producer listings are consulted as well when
+  /// the search finds nothing.
+  Future<({String? thumb, String? tagKey})> _plezyNamesake(
+    String name, {
+    bool roleLists = false,
+    String? sectionId,
+    String? selfId,
+  }) {
+    final cacheKey = '${roleLists ? 'L' : 'S'}|${sectionId ?? ''}|${selfId ?? ''}|$name';
+    final cached = _plezyNamesakes[cacheKey];
+    if (cached != null) return cached;
+    Future<({String? thumb, String? tagKey})> load() async {
+      if (roleLists) {
+        final searched = await _plezyNamesake(name, sectionId: sectionId);
+        if (searched.thumb != null || searched.tagKey != null) return searched;
+      }
+      String? only(Iterable<Object?> values) {
+        final set = {for (final v in values) if (v != null && v.toString().isNotEmpty) v.toString()};
+        return set.length == 1 ? set.single : null;
+      }
+
+      String key(Map<String, dynamic> m) => m['tagKey']?.toString() ?? '';
+      String photo(Map<String, dynamic> m) => m['thumb']?.toString() ?? '';
+
+      if (!roleLists) {
+        final matches = <Map<String, dynamic>>[];
+        final response = await _getWithFailover(
+          '/hubs/search',
+          queryParameters: {'query': name, 'searchTypes': 'people', 'limit': 15},
+        );
+        final hubs = _getMediaContainer(response)?['Hub'];
+        for (final hub in hubs is List ? hubs : const []) {
+          if (hub is! Map) continue;
+          for (final list in [hub['Directory'], hub['Metadata']]) {
+            for (final entry in flexibleMapList(list)) {
+              if (entry['type'] == 'tag' && entry['tag']?.toString().trim() == name) matches.add(entry);
+            }
+          }
+        }
+        final section =
+            sectionId ??
+            matches.where((m) => m['id']?.toString() == selfId).map((m) => m['librarySectionID']?.toString()).firstOrNull;
+        final keyed = matches.where((m) => key(m).isNotEmpty).toList();
+        String? chosen;
+        for (final candidates in [
+          if (section != null) keyed.where((m) => m['librarySectionID']?.toString() == section),
+          keyed.where((m) => photo(m).isNotEmpty),
+          keyed,
+        ]) {
+          final keys = {for (final m in candidates) key(m)};
+          if (keys.length == 1) {
+            chosen = keys.single;
+            break;
+          }
+        }
+        if (chosen != null) {
+          final thumb = keyed.where((m) => key(m) == chosen).map(photo).firstWhere((t) => t.isNotEmpty, orElse: () => '');
+          return (thumb: thumb.isEmpty ? null : thumb, tagKey: chosen);
+        }
+        if (keyed.isNotEmpty) return (thumb: null, tagKey: null);
+        return (thumb: only(matches.map(photo)), tagKey: null);
+      }
+
+      final sections = (await _getLibraries()).where((l) => l.type == 'movie' || l.type == 'show');
+      final lists = await Future.wait([
+        for (final section in sections)
+          for (final role in const ['writer', 'producer'])
+            _plezyRoleList(section.key, role, null).catchError((_) => <Map<String, dynamic>>[]),
+      ]);
+      final thumb = only([
+        for (final list in lists)
+          for (final entry in list)
+            if (entry['title']?.toString().trim() == name) entry['thumb'],
+      ]);
+      return (thumb: thumb, tagKey: null);
+    }
+
+    final future = load();
+    _plezyNamesakes[cacheKey] = future;
+    future.catchError((_) {
+      _plezyNamesakes.remove(cacheKey);
+      return (thumb: null, tagKey: null);
+    });
+    return future;
+  }
+
+  /// Plezy+: [item] with photos filled in for cast and crew that have none,
+  /// or null when nothing changed. [onUpdate] receives intermediate results
+  /// (at most every 300 ms) so photos appear as they are found.
+  Future<MediaItem?> withNamesakePhotos(MediaItem item, {void Function(MediaItem item)? onUpdate}) async {
+    final roles = item.roles ?? const <MediaRole>[];
+    final crewRaw = item.raw?[plexCrewRawKey];
+    final crew = [for (final e in crewRaw is List ? crewRaw : const []) if (e is Map) Map<String, Object?>.from(e)];
+    // Only people from .nfo files: those the agents matched (with a plex.tv
+    // id) but without a photo have no better photo to find.
+    final nfoRaw = item.raw?[plexNfoPeopleRawKey];
+    final nfo = nfoRaw is List ? {for (final n in nfoRaw) n.toString()} : null;
+    bool missing(Object? thumb) => (thumb?.toString() ?? '').isEmpty;
+    String nameOf(Object? tag) => tag?.toString().trim() ?? '';
+    bool wanted(Object? tag, Object? thumb) =>
+        missing(thumb) && nameOf(tag).isNotEmpty && (nfo == null || nfo.contains(nameOf(tag)));
+    final cast = {for (final r in roles) if (wanted(r.tag, r.thumbPath)) nameOf(r.tag)};
+    // Writers and producers are not in the search index; only they need the listings.
+    final listed = {
+      for (final c in crew)
+        if (wanted(c['tag'], c['thumb']) && c['job'] != 'director' && !cast.contains(nameOf(c['tag'])))
+          nameOf(c['tag']),
+    };
+    final searched = {
+      ...cast,
+      for (final c in crew)
+        if (wanted(c['tag'], c['thumb']) && !listed.contains(nameOf(c['tag']))) nameOf(c['tag']),
+    };
+    if (searched.isEmpty && listed.isEmpty) return null;
+
+    final found = <String, String>{};
+    MediaItem apply() => item.copyWith(
+      roles: item.roles == null
+          ? null
+          : [
+              for (final r in roles)
+                missing(r.thumbPath) && found[nameOf(r.tag)] != null
+                    ? MediaRole(id: r.id, tag: r.tag, role: r.role, thumbPath: found[nameOf(r.tag)])
+                    : r,
+            ],
+      raw: crew.isEmpty
+          ? item.raw
+          : {
+              ...?item.raw,
+              plexCrewRawKey: [
+                for (final c in crew)
+                  missing(c['thumb']) && found[nameOf(c['tag'])] != null ? {...c, 'thumb': found[nameOf(c['tag'])]} : c,
+              ],
+            },
+    );
+    Timer? pending;
+    void record(String name, ({String? thumb, String? tagKey}) n) {
+      if (n.thumb == null) return;
+      found[name] = n.thumb!;
+      if (onUpdate != null) {
+        pending ??= Timer(const Duration(milliseconds: 300), () {
+          pending = null;
+          onUpdate(apply());
+        });
+      }
+    }
+
+    await Future.wait([
+      for (final name in searched)
+        _plezyNamesake(name, sectionId: item.libraryId).then((n) => record(name, n), onError: (_) {}),
+      for (final name in listed)
+        _plezyNamesake(name, roleLists: true, sectionId: item.libraryId).then((n) => record(name, n), onError: (_) {}),
+    ]);
+    pending?.cancel();
+    return found.isEmpty ? null : apply();
+  }
+
+  Future<List<Map<String, dynamic>>> _plezyRoleList(String sectionId, String role, AbortController? abort) {
+    final cacheKey = '$sectionId/$role';
+    final cached = _plezyRoleLists[cacheKey];
+    if (cached != null && DateTime.now().difference(cached.$1) < const Duration(minutes: 30)) return cached.$2;
+    final future = _getWithFailover('/library/sections/$sectionId/$role', abort: abort)
+        .then((response) => flexibleMapList(_getMediaContainer(response)?['Directory']));
+    _plezyRoleLists[cacheKey] = (DateTime.now(), future);
+    future.catchError((_) {
+      _plezyRoleLists.remove(cacheKey);
+      return <Map<String, dynamic>>[];
+    });
+    return future;
+  }
+
   @override
   Future<MediaPersonDetails> fetchPersonDetails(String personId, {AbortController? abort}) async {
     final accountToken = plexAccountToken;
     if (isOfflineMode || accountToken == null || accountToken.isEmpty) return MediaPersonDetails.empty;
     final tagResponse = await _getWithFailover('/library/people/$personId', abort: abort);
-    final tagKey = firstFlexibleMap(_getMediaContainer(tagResponse)?['Directory'])?['tagKey'];
+    final person = firstFlexibleMap(_getMediaContainer(tagResponse)?['Directory']);
+    var tagKey = person?['tagKey'];
+    if (tagKey is! String || tagKey.isEmpty) {
+      // Plezy+: .nfo people carry no plex.tv id; borrow the namesake's.
+      final name = (person?['tag'] ?? person?['title'])?.toString().trim() ?? '';
+      tagKey = name.isEmpty ? null : (await _plezyNamesake(name, selfId: personId).catchError((_) => (thumb: null, tagKey: null))).tagKey;
+    }
     if (tagKey is! String || tagKey.isEmpty) return MediaPersonDetails.empty;
     // A plex.tv failure says nothing about this server's endpoints, so it
     // must not walk (or exhaust) the server's failover list.

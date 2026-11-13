@@ -1523,15 +1523,32 @@ class _DiscoverScreenState extends State<DiscoverScreen>
                             ),
 
                             // Metadata as dot-separated text with content type
-                            if (heroItem.year != null || heroItem.contentRating != null || heroItem.rating != null) ...[
+                            if (heroItem.year != null || heroItem.contentRating != null || (heroItem.userRating ?? 0) > 0) ...[
                               const SizedBox(height: 16),
-                              Text(
-                                [
-                                  contentTypeLabel,
-                                  if (heroItem.rating != null) '★ ${formatRating(heroItem.rating!)}',
-                                  if (heroItem.contentRating != null) formatContentRating(heroItem.contentRating!),
-                                  if (heroItem.year != null) heroItem.year.toString(),
-                                ].join(' • '),
+                              Text.rich(
+                                TextSpan(
+                                  children: [
+                                    for (final (i, part) in <InlineSpan>[
+                                      TextSpan(text: contentTypeLabel),
+                                      // Plezy+: the viewer's own rating (0-10, amber star) instead
+                                      // of the listing's unattributed score.
+                                      if ((heroItem.userRating ?? 0) > 0)
+                                        TextSpan(
+                                          children: [
+                                            const TextSpan(text: '★ ', style: TextStyle(color: Colors.amber)),
+                                            TextSpan(text: formatRating(heroItem.userRating!)),
+                                          ],
+                                        ),
+                                      if (heroItem.contentRating != null)
+                                        TextSpan(text: formatContentRating(heroItem.contentRating!)),
+                                      if (heroItem.year != null) TextSpan(text: heroItem.year.toString()),
+                                      if (heroItem.editionTitle != null) TextSpan(text: heroItem.editionTitle),
+                                    ].indexed) ...[
+                                      if (i > 0) const TextSpan(text: ' • '),
+                                      part,
+                                    ],
+                                  ],
+                                ),
                                 style: TextStyle(
                                   color: colorScheme.onSurface,
                                   fontSize: isTv ? 18 : 14,

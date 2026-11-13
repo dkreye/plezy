@@ -64,6 +64,15 @@ class _FileInfoBottomSheetState extends State<FileInfoBottomSheet> {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
           if (widget.title.isNotEmpty) _ItemHeadline(title: widget.title, versions: versions),
+          // Plezy+: the item's labels.
+          if (widget.fileInfo.labels.isNotEmpty)
+            _InfoSection(
+              title: 'Beschriftungen',
+              icon: Symbols.label_rounded,
+              chips: widget.fileInfo.labels,
+              chipsOnly: true,
+              fields: const [],
+            ),
           for (var index = 0; index < versions.length; index++)
             _VersionBlock(
               version: versions[index],
@@ -585,6 +594,9 @@ class _InfoSection extends StatelessWidget {
   /// Rendered above the grid — used for the full-width path row.
   final Widget? leading;
 
+  /// Plezy+: show the section with chips alone (labels).
+  final bool chipsOnly;
+
   const _InfoSection({
     required this.title,
     required this.icon,
@@ -592,12 +604,13 @@ class _InfoSection extends StatelessWidget {
     this.subtitle,
     this.chips = const [],
     this.leading,
+    this.chipsOnly = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final populated = fields.whereType<_InfoField>().toList(growable: false);
-    if (populated.isEmpty && leading == null) return const SizedBox.shrink();
+    if (populated.isEmpty && leading == null && !(chipsOnly && chips.isNotEmpty)) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
     final mono = tokens(context);
