@@ -10,9 +10,11 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_person.dart';
 import '../media/media_server_client.dart';
+import '../services/plex_client.dart';
 import '../mixins/paginated_item_loader.dart';
 import '../mixins/standard_paginated_view.dart';
 import '../utils/app_logger.dart';
+import '../utils/platform_detector.dart';
 import '../utils/error_message_utils.dart';
 import '../utils/media_server_http_client.dart';
 import '../utils/provider_extensions.dart';
@@ -284,15 +286,54 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
         ),
         _buildActorHeader(),
         ...buildStateSlivers(),
-        if (hasItems)
-          buildSparseFocusableGrid(
-            totalItems: totalSize,
-            itemAt: (index) => loadedItems[index],
-            onRefresh: updateItem,
-            onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
-            onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
-          ),
+        if (hasItems) ..._buildFilmographySlivers(context),
       ],
     );
+  }
+
+  /// Plezy+: acting and crew roles as two titled sections ("Besetzung",
+  /// "Stab") when the person has both; otherwise one grid as before.
+  /// Both grids share the screen's focus index space.
+  List<Widget> _buildFilmographySlivers(BuildContext context) {
+    final client = _mediaClientOrNull;
+    final castCount = client is PlexClient ? client.personCastCount(widget.personId) : null;
+    if (castCount == null || castCount <= 0 || castCount >= totalSize) {
+      return [
+        buildSparseFocusableGrid(
+          totalItems: totalSize,
+          itemAt: (index) => loadedItems[index],
+          onRefresh: updateItem,
+          onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
+          onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
+        ),
+      ];
+    }
+    final titleStyle = Theme.of(
+      context,
+    ).textTheme.titleLarge?.copyWith(fontWeight: .bold, fontSize: PlatformDetector.isTV() ? 28 : null);
+    Widget title(String text) => SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: Text(text, style: titleStyle),
+      ),
+    );
+    return [
+      title(t.discover.cast),
+      buildSparseFocusableGrid(
+        totalItems: castCount,
+        itemAt: (index) => loadedItems[index],
+        onRefresh: updateItem,
+        onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
+        onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
+      ),
+      title('Stab'),
+      buildSparseFocusableGrid(
+        totalItems: totalSize - castCount,
+        itemAt: (index) => loadedItems[castCount + index],
+        onRefresh: updateItem,
+        onSkeletonVisible: (index) => ensureIndexLoaded(castCount + index, pageSize: _pageSize),
+        indexOffset: castCount,
+      ),
+    ];
   }
 }

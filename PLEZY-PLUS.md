@@ -33,6 +33,7 @@ Der Branch besteht aus zwei Commits auf der Basis:
 ### Filmografie
 - Die Filmografie einer Person (aus Besetzung oder Crew) zeigt alle ihre Einträge, egal in welcher Rolle: Darsteller, Regie, Drehbuch, Produktion. Plex führt je Rolle ein eigenes Tag; Plezy+ sucht die übrigen Tags derselben Person und führt deren Filme zusammen, jeden Film einmal. Sortiert wird immer nach Jahr, neueste zuerst, innerhalb eines Jahres alphabetisch (auch bei nur einer Rolle).
 - Darsteller und Regie findet die Suche über die plex.tv-Personen-ID (`tagKey`), Drehbuch und Produktion die Listen `/library/sections/<id>/writer` bzw. `/producer` über gleichen Namen und gleiches Foto (diese Listen tragen keinen `tagKey`). Die Listen werden 30 Minuten zwischengespeichert.
+- Hat die Person gespielt und war im Stab, zeigt die Filmografie zwei Abschnitte: „Besetzung“ (Darsteller) und „Stab“ (Regie, Drehbuch, Produktion), jeder für sich nach Jahr sortiert. Ein Film kann in beiden stehen.
 - Schlägt das fehl, bleibt es bei den Einträgen der einen Rolle.
 
 ### Personen aus .nfo-Dateien

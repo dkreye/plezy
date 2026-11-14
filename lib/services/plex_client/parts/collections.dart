@@ -244,6 +244,7 @@ mixin _PlexCollectionMethods on _PlexClientInternals {
   }) async {
     // Plezy+: one filmography across all role tags of the person.
     List<PlexMetadataDto>? merged;
+    if ((start ?? 0) == 0) _plezyPersonCastCount.remove(personId);
     try {
       merged = await _mergedPersonMedia(personId, refresh: (start ?? 0) == 0, abort: abort);
     } catch (e, st) {
@@ -312,6 +313,9 @@ mixin _PlexCollectionMethods on _PlexClientInternals {
     }
 
     final ids = <String>{personId};
+    // Tags that are not acting roles (director, writer, producer).
+    final crewIds = <String>{};
+    var personFound = false;
 
     Future<void> fromSearch() async {
       final response = await _getWithFailover('/hubs/search', queryParameters: {'query': name, 'searchTypes': 'people', 'limit': 50}, abort: abort);
@@ -328,7 +332,10 @@ mixin _PlexCollectionMethods on _PlexClientInternals {
             final match = tagKey.isNotEmpty && key.isNotEmpty
                 ? key == tagKey
                 : entry['tag']?.toString().trim() == name && samePhoto(entry['thumb']);
-            if (match) ids.add(id);
+            if (id == personId) personFound = true;
+            if (!match && id != personId) continue;
+            ids.add(id);
+            if (flexibleInt(entry['tagType']) != 6) crewIds.add(id);
           }
         }
       }
@@ -345,7 +352,10 @@ mixin _PlexCollectionMethods on _PlexClientInternals {
         for (final entry in list) {
           if (entry['title']?.toString().trim() != name || !samePhoto(entry['thumb'])) continue;
           final id = entry['key']?.toString() ?? '';
-          if (id.isNotEmpty && !id.contains('/')) ids.add(id);
+          if (id.isEmpty || id.contains('/')) continue;
+          ids.add(id);
+          crewIds.add(id);
+          if (id == personId) personFound = true;
         }
       }
     }
@@ -355,27 +365,49 @@ mixin _PlexCollectionMethods on _PlexClientInternals {
       fromRoleLists().catchError((Object e) => appLogger.w('Plezy+: role lists failed', error: e)),
     ]);
 
+    // A tag found nowhere counts as acting (the cast row is the usual way in).
+    if (!personFound) crewIds.remove(personId);
+
+    final idList = ids.toList();
     final results = await Future.wait([
-      for (final id in ids)
+      for (final id in idList)
         id == personId
             ? _getPersonMedia(id, abort: abort)
             : _getPersonMedia(id, abort: abort).catchError((_) => const _LibraryContentResult(items: [], totalSize: 0)),
     ]);
-    final seen = <String>{};
-    final merged = [
-      for (final result in results)
-        for (final item in result.items)
-          if (seen.add(item.ratingKey)) item,
-    ];
-    // Newest year first, alphabetical within a year (the card shows only the year).
-    int year(PlexMetadataDto m) => m.year ?? int.tryParse((m.originallyAvailableAt ?? '').split('-').first) ?? 0;
-    merged.sort((a, b) {
-      final byYear = year(b).compareTo(year(a));
-      if (byYear != 0) return byYear;
-      return (a.titleSort ?? a.title ?? '').toLowerCase().compareTo((b.titleSort ?? b.title ?? '').toLowerCase());
-    });
-    return merged;
+    // Two lists, cast and crew; a film can be in both, but only once in each.
+    List<PlexMetadataDto> collect(bool crew) {
+      final seen = <String>{};
+      final list = [
+        for (final (i, result) in results.indexed)
+          if (crewIds.contains(idList[i]) == crew)
+            for (final item in result.items)
+              if (seen.add(item.ratingKey)) item,
+      ];
+      // Newest year first, alphabetical within a year (the card shows only the year).
+      int year(PlexMetadataDto m) => m.year ?? int.tryParse((m.originallyAvailableAt ?? '').split('-').first) ?? 0;
+      list.sort((a, b) {
+        final byYear = year(b).compareTo(year(a));
+        if (byYear != 0) return byYear;
+        return (a.titleSort ?? a.title ?? '').toLowerCase().compareTo((b.titleSort ?? b.title ?? '').toLowerCase());
+      });
+      return list;
+    }
+
+    final cast = collect(false);
+    final crew = collect(true);
+    _plezyPersonCastCount[personId] = cast.length;
+    return [...cast, ...crew];
   }
+
+  /// Plezy+: per person id, how many entries of the merged filmography are
+  /// acting roles; they come first, the crew roles after them.
+  final Map<String, int> _plezyPersonCastCount = {};
+
+  /// Plezy+: number of acting roles at the start of [fetchPersonMediaPage]'s
+  /// list for [personId], or null when the list is not split (not loaded,
+  /// or the merge failed).
+  int? personCastCount(String personId) => _plezyPersonCastCount[personId];
 
   /// Plezy+: photo and plex.tv id of a person's matched namesake, per name.
   final Map<String, Future<({String? thumb, String? tagKey})>> _plezyNamesakes = {};
