@@ -291,13 +291,13 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
     );
   }
 
-  /// Plezy+: acting and crew roles as two titled sections ("Besetzung",
-  /// "Crew") when the person has both; otherwise one grid as before.
-  /// Both grids share the screen's focus index space.
+  /// Plezy+: acting and crew roles as titled sections ("Besetzung", "Crew"),
+  /// each shown when it has entries; one untitled grid as before when the
+  /// split is unknown. Both grids share the screen's focus index space.
   List<Widget> _buildFilmographySlivers(BuildContext context) {
     final client = _mediaClientOrNull;
     final castCount = client is PlexClient ? client.personCastCount(widget.personId) : null;
-    if (castCount == null || castCount <= 0 || castCount >= totalSize) {
+    if (castCount == null || castCount > totalSize) {
       return [
         buildSparseFocusableGrid(
           totalItems: totalSize,
@@ -318,22 +318,27 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
       ),
     );
     return [
-      title(t.discover.cast),
-      buildSparseFocusableGrid(
-        totalItems: castCount,
-        itemAt: (index) => loadedItems[index],
-        onRefresh: updateItem,
-        onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
-        onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
-      ),
-      title('Crew'),
-      buildSparseFocusableGrid(
-        totalItems: totalSize - castCount,
-        itemAt: (index) => loadedItems[castCount + index],
-        onRefresh: updateItem,
-        onSkeletonVisible: (index) => ensureIndexLoaded(castCount + index, pageSize: _pageSize),
-        indexOffset: castCount,
-      ),
+      if (castCount > 0) ...[
+        title(t.discover.cast),
+        buildSparseFocusableGrid(
+          totalItems: castCount,
+          itemAt: (index) => loadedItems[index],
+          onRefresh: updateItem,
+          onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
+          onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
+        ),
+      ],
+      if (castCount < totalSize) ...[
+        title('Crew'),
+        buildSparseFocusableGrid(
+          totalItems: totalSize - castCount,
+          itemAt: (index) => loadedItems[castCount + index],
+          onRefresh: updateItem,
+          onSkeletonVisible: (index) => ensureIndexLoaded(castCount + index, pageSize: _pageSize),
+          onFirstRowNavigateUp: castCount == 0 && _biographyExpandable ? _focusBiography : null,
+          indexOffset: castCount,
+        ),
+      ],
     ];
   }
 }
