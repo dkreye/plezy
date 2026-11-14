@@ -292,7 +292,7 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
   }
 
   /// Plezy+: acting and crew roles as two titled sections ("Besetzung",
-  /// "Stab") when the person has both; otherwise one grid as before.
+  /// "Crew") when the person has both; otherwise one grid as before.
   /// Both grids share the screen's focus index space.
   List<Widget> _buildFilmographySlivers(BuildContext context) {
     final client = _mediaClientOrNull;
@@ -326,7 +326,7 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
         onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
         onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
       ),
-      title('Stab'),
+      title('Crew'),
       buildSparseFocusableGrid(
         totalItems: totalSize - castCount,
         itemAt: (index) => loadedItems[castCount + index],
