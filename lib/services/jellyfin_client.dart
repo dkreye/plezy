@@ -35,6 +35,7 @@ import '../media/media_playlist.dart';
 import '../media/media_person.dart';
 import '../media/ids.dart';
 import '../media/media_server_client.dart';
+import '../media/plezy_plus.dart';
 import '../media/playback_report_metadata.dart';
 import '../media/server_capabilities.dart';
 import '../models/audio_quality_preset.dart';
@@ -284,7 +285,8 @@ class JellyfinClient
         SeasonEpisodePagingClient,
         MediaDeletionPermissionClient,
         ScopedMediaServerClient,
-        GracefullyCloseable {
+        GracefullyCloseable,
+        PersonRoleSplitClient {
   JellyfinClient._({required this._connection, required this._http, FavoriteChannelsRepository? favoritesRepository})
     : _favoritesRepository = favoritesRepository ?? const SharedPreferencesFavoriteChannelsRepository(),
       _paths = MediaBrowserPaths(dialect: _connection.dialect, userId: _connection.userId);

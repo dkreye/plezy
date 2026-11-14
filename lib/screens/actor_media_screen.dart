@@ -10,7 +10,7 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_person.dart';
 import '../media/media_server_client.dart';
-import '../services/plex_client.dart';
+import '../media/plezy_plus.dart';
 import '../mixins/paginated_item_loader.dart';
 import '../mixins/standard_paginated_view.dart';
 import '../utils/app_logger.dart';
@@ -296,7 +296,7 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
   /// split is unknown. Both grids share the screen's focus index space.
   List<Widget> _buildFilmographySlivers(BuildContext context) {
     final client = _mediaClientOrNull;
-    final castCount = client is PlexClient ? client.personCastCount(widget.personId) : null;
+    final castCount = client is PersonRoleSplitClient ? (client as PersonRoleSplitClient).personCastCount(widget.personId) : null;
     if (castCount == null || castCount > totalSize) {
       return [
         buildSparseFocusableGrid(

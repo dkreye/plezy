@@ -35,7 +35,17 @@ MediaFileInfo? parseJellyfinFileInfoFromJson(Map<String, dynamic> json) {
       appLogger.w('Skipping malformed Jellyfin media source', error: error, stackTrace: stackTrace);
     }
   }
-  return versions.isEmpty ? null : MediaFileInfo(versions: versions);
+  if (versions.isEmpty) return null;
+  // Plezy+: the item's tags, shown as "Beschriftungen".
+  final tags = json['Tags'];
+  return MediaFileInfo(
+    versions: versions,
+    labels: [
+      if (tags is List)
+        for (final tag in tags)
+          if (tag is String && tag.trim().isNotEmpty) tag.trim(),
+    ],
+  );
 }
 
 MediaStreamDetails? _firstStreamOfKind(List<MediaStreamDetails> streams, MediaStreamKind kind) {

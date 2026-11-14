@@ -13,7 +13,7 @@ Persönliche Variante von [Plezy](https://github.com/edde746/plezy) mit Erweiter
 Der Branch besteht aus zwei Commits auf der Basis:
 
 1. **Build und CI** – Workflow „Plezy+ APK“ und diese Doku
-2. **Quellcode** – Editionen-, Sammlungs- und Crew-Reihen, Filmografie über alle Rollen, Versionsnamen, Beschriftungen in den Dateiinformationen, Reihenabstand im Raster, Edition und Bewertungen, eigene App-ID
+2. **Quellcode** – Editionen-, Sammlungs- und Crew-Reihen, Filmografie über alle Rollen, Besetzung/Crew getrennt, Versionsnamen, Beschriftungen in den Dateiinformationen, Reihenabstand im Raster, Edition und Bewertungen, eigene App-ID
 
 ### Detailseite: Editionen-Reihe
 - Alle Editionen eines Films (gleiche guid in derselben Bibliothek), Standard zuerst als `<Standard>`, die übrigen mit ihrem Editionsnamen.
@@ -27,13 +27,13 @@ Der Branch besteht aus zwei Commits auf der Basis:
 - Die Sammlungsreihen, die der Plex-Server selbst liefert, entfallen, sie wären doppelt.
 
 ### Detailseite: Crew
-- Nach der Besetzung eine Reihe „Crew“ (TV, Handy, Desktop) mit Regie, Drehbuch und Produktion: Foto, Name und Aufgabe, je Person einmal mit allen Aufgaben („Regie, Drehbuch“). Auswählen öffnet die Filmografie.
+- Nach der Besetzung eine Reihe „Crew“ (TV, Handy, Desktop) mit Regie, Drehbuch und Produktion: Foto, Name und Aufgabe, je Person einmal mit allen Aufgaben („Regie, Drehbuch“). Auswählen öffnet die Filmografie. Gilt für Plex und Emby/Jellyfin.
 - Die Info-Zeilen am Seitenende (Studio, Regie, Altersfreigabe) entfallen.
 
 ### Filmografie
 - Die Filmografie einer Person (aus Besetzung oder Crew) zeigt alle ihre Einträge, egal in welcher Rolle: Darsteller, Regie, Drehbuch, Produktion. Plex führt je Rolle ein eigenes Tag; Plezy+ sucht die übrigen Tags derselben Person und führt deren Filme zusammen, jeden Film einmal. Sortiert wird immer nach Jahr, neueste zuerst, innerhalb eines Jahres alphabetisch (auch bei nur einer Rolle).
 - Darsteller und Regie findet die Suche über die plex.tv-Personen-ID (`tagKey`), Drehbuch und Produktion die Listen `/library/sections/<id>/writer` bzw. `/producer` über gleichen Namen und gleiches Foto (diese Listen tragen keinen `tagKey`). Die Listen werden 30 Minuten zwischengespeichert.
-- Die Filmografie ist in die Abschnitte „Besetzung“ (Darsteller) und „Crew“ (Regie, Drehbuch, Produktion) geteilt, jeder mit Überschrift und für sich nach Jahr sortiert; ein Abschnitt ohne Einträge entfällt. Ein Film kann in beiden stehen.
+- Die Filmografie ist in die Abschnitte „Besetzung“ (Darsteller) und „Crew“ (Regie, Drehbuch, Produktion) geteilt, jeder mit Überschrift und für sich nach Jahr sortiert; ein Abschnitt ohne Einträge entfällt. Ein Film kann in beiden stehen. Bei Emby/Jellyfin zählen zur Crew zusätzlich Musik, Schnitt und Idee (Composer, Editor, Creator).
 - Schlägt das fehl, bleibt es bei den Einträgen der einen Rolle.
 
 ### Personen aus .nfo-Dateien
@@ -60,7 +60,7 @@ Der Branch besteht aus zwei Commits auf der Basis:
 - Nur bei mehreren Versionen und nur, wenn jede Version einen eigenen, unterschiedlichen Namen ergibt; sonst bleiben die technischen Angaben. Benutzer mit eingeschränktem Zugriff bekommen von Plex keine Dateipfade und sehen ebenfalls die Technik.
 
 ### Dateiinformationen
-- Die Dateiinformationen zeigen über den Versionen die Beschriftungen des Eintrags (Plex-`Label`).
+- Die Dateiinformationen zeigen über den Versionen die Beschriftungen des Eintrags (Plex-`Label`, bei Emby/Jellyfin `Tags`).
 
 ### Android
 - App-ID `biz.kreye.plezy`, Name „Plezy+“. FileProvider- und Artwork-Provider-Authorities sind ebenfalls umbenannt, sonst scheitert die Installation neben dem Original.

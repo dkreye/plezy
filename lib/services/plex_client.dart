@@ -21,6 +21,7 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_library.dart';
 import '../media/media_person.dart';
+import '../media/plezy_plus.dart';
 import '../media/media_role.dart';
 import '../media/media_playlist.dart';
 import '../media/ids.dart';
@@ -403,7 +404,7 @@ class PlexClient
         _PlexCollectionMethods,
         _PlexPlayQueueMethods,
         _PlexMetadataEditMethods
-    implements MediaServerClient, ScopedMediaServerClient, GracefullyCloseable {
+    implements MediaServerClient, ScopedMediaServerClient, GracefullyCloseable, PersonRoleSplitClient {
   @override
   PlexConfig config;
 

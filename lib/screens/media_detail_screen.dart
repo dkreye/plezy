@@ -50,7 +50,7 @@ import '../widgets/optimized_media_image.dart';
 import '../utils/media_image_helper.dart';
 import '../utils/media_quality_labels.dart';
 import '../services/plex_client.dart';
-import '../services/plex_mappers.dart' show plexCrewRawKey;
+import '../media/plezy_plus.dart';
 import '../media/media_server_client.dart';
 import '../services/media_list_playback_launcher.dart';
 import '../utils/content_utils.dart';
@@ -4547,7 +4547,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   List<MediaRole> _crewRoles(MediaItem metadata) {
     final cached = _crewRolesCache;
     if (cached != null && identical(cached.$1, metadata)) return cached.$2;
-    final raw = metadata.raw?[plexCrewRawKey];
+    final raw = metadata.raw?[mediaCrewRawKey];
     if (raw is! List) return const [];
     final de = LocaleSettings.currentLocale == AppLocale.de;
     String jobLabel(Object? job) => switch (job) {

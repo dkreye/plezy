@@ -1,4 +1,5 @@
 import '../media/media_browser_dialect.dart';
+import '../media/plezy_plus.dart';
 import '../media/ids.dart';
 import '../media/media_hub.dart';
 import '../media/media_item.dart';
@@ -121,7 +122,21 @@ class JellyfinImageAbsolutizer {
       roles: item.roles
           ?.map((r) => MediaRole(id: r.id, tag: r.tag, role: r.role, thumbPath: absolutize(r.thumbPath)))
           .toList(),
+      raw: _absolutizeCrew(item.raw),
     );
+  }
+
+  /// Plezy+: crew photos need the same treatment as the cast's.
+  Map<String, Object?>? _absolutizeCrew(Map<String, Object?>? raw) {
+    final crew = raw?[mediaCrewRawKey];
+    if (raw == null || crew is! List) return raw;
+    return <String, Object?>{
+      ...raw,
+      mediaCrewRawKey: [
+        for (final c in crew)
+          if (c is Map) {...c, 'thumb': absolutize(c['thumb'] as String?)} else c,
+      ],
+    };
   }
 }
 
@@ -298,7 +313,7 @@ class JellyfinMappers {
       playlistItemId: item['PlaylistItemId'] as String?,
       serverId: serverId,
       serverName: serverName,
-      raw: item,
+      raw: _withCrew(item),
     );
     return absolutizer == null ? mapped : absolutizer.applyTo(mapped);
   }
@@ -501,6 +516,20 @@ class JellyfinMappers {
       }
     }
     return nullIfEmptyList(result);
+  }
+
+  /// Plezy+: [item] plus the crew under [mediaCrewRawKey] (see there), for
+  /// the detail page's crew row; [item] itself when it lists no crew.
+  static Map<String, dynamic> _withCrew(Map<String, dynamic> item) {
+    final people = item['People'];
+    if (people is! List) return item;
+    const jobs = {'Director': 'director', 'Writer': 'writer', 'Producer': 'producer'};
+    final crew = <Map<String, Object?>>[
+      for (final entry in people)
+        if (entry is Map<String, dynamic> && jobs.containsKey(entry['Type']) && entry['Name'] is String)
+          {'id': entry['Id'], 'tag': entry['Name'], 'thumb': _personImage(entry), 'job': jobs[entry['Type']]},
+    ];
+    return crew.isEmpty ? item : <String, dynamic>{...item, mediaCrewRawKey: crew};
   }
 
   static List<MediaRole>? _actors(Object? list) {
