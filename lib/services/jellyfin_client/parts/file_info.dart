@@ -36,14 +36,15 @@ MediaFileInfo? parseJellyfinFileInfoFromJson(Map<String, dynamic> json) {
     }
   }
   if (versions.isEmpty) return null;
-  // Plezy+: the item's tags, shown as "Beschriftungen".
-  final tags = json['Tags'];
+  // Plezy+: the item's tags, shown as "Beschriftungen". Jellyfin sends
+  // `Tags` (strings), Emby only `TagItems` (name/id pairs).
+  final tags = json['Tags'] is List ? json['Tags'] as List : json['TagItems'];
   return MediaFileInfo(
     versions: versions,
     labels: [
       if (tags is List)
         for (final tag in tags)
-          if (tag is String && tag.trim().isNotEmpty) tag.trim(),
+          if ((tag is Map ? tag['Name'] : tag) case final String name when name.trim().isNotEmpty) name.trim(),
     ],
   );
 }
