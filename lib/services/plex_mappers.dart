@@ -660,6 +660,15 @@ class PlexMetadataDto {
   final String? librarySectionTitle;
   final String? ratingImage;
   final String? audienceRatingImage;
+
+  /// Plezy+: Director/Writer/Producer tags with id and thumb, JSON-safe
+  /// (`id`, `tag`, `thumb`, `job`). Filled by [PlexMetadataDto.fromJsonWithImages].
+  final List<Map<String, Object?>>? crew;
+
+  /// Plezy+: names of cast and crew without a plex.tv person id (`tagKey`),
+  /// i.e. read from local .nfo files. Null when the server sends no tagKey
+  /// at all, so the two cannot be told apart.
+  final List<String>? nfoPeople;
   final String? tagline;
   final String? originalTitle;
   final String? editionTitle;
@@ -736,6 +745,8 @@ class PlexMetadataDto {
     this.librarySectionTitle,
     this.ratingImage,
     this.audienceRatingImage,
+    this.crew,
+    this.nfoPeople,
     this.tagline,
     this.originalTitle,
     this.editionTitle,
@@ -770,6 +781,50 @@ class PlexMetadataDto {
   }
 
   factory PlexMetadataDto.fromJsonWithImages(Map<String, dynamic> json) {
+    final dto = _fromJsonWithImages(json);
+    final crew = _crewFromJson(json);
+    final nfoPeople = _nfoPeopleFromJson(json);
+    return crew == null && nfoPeople == null ? dto : dto.copyWith(crew: crew, nfoPeople: nfoPeople);
+  }
+
+  /// Plezy+: see [nfoPeople].
+  static List<String>? _nfoPeopleFromJson(Map<String, dynamic> json) {
+    final names = <String>{};
+    var anyTagKey = false;
+    for (final key in const ['Role', 'Director', 'Writer', 'Producer']) {
+      final tags = json[key];
+      if (tags is! List) continue;
+      for (final tag in tags) {
+        if (tag is! Map) continue;
+        final name = tag['tag']?.toString().trim() ?? '';
+        if (name.isEmpty) continue;
+        if ((tag['tagKey']?.toString() ?? '').isNotEmpty) {
+          anyTagKey = true;
+        } else {
+          names.add(name);
+        }
+      }
+    }
+    return anyTagKey ? names.toList() : null;
+  }
+
+  /// Plezy+: the crew tags in display order (director, writer, producer).
+  static List<Map<String, Object?>>? _crewFromJson(Map<String, dynamic> json) {
+    final crew = <Map<String, Object?>>[];
+    for (final (key, job) in const [('Director', 'director'), ('Writer', 'writer'), ('Producer', 'producer')]) {
+      final tags = json[key];
+      if (tags is! List) continue;
+      for (final tag in tags) {
+        if (tag is! Map) continue;
+        final name = tag['tag']?.toString().trim();
+        if (name == null || name.isEmpty) continue;
+        crew.add({'id': tag['id']?.toString(), 'tag': name, 'thumb': tag['thumb']?.toString(), 'job': job});
+      }
+    }
+    return crew.isEmpty ? null : crew;
+  }
+
+  static PlexMetadataDto _fromJsonWithImages(Map<String, dynamic> json) {
     String? clearLogoUrl;
     String? backgroundSquareUrl;
     final images = json['Image'] as List?;
@@ -860,6 +915,8 @@ class PlexMetadataDto {
     String? librarySectionTitle,
     String? ratingImage,
     String? audienceRatingImage,
+    List<Map<String, Object?>>? crew,
+    List<String>? nfoPeople,
     String? tagline,
     String? originalTitle,
     String? editionTitle,
@@ -931,6 +988,8 @@ class PlexMetadataDto {
       librarySectionTitle: librarySectionTitle ?? this.librarySectionTitle,
       ratingImage: ratingImage ?? this.ratingImage,
       audienceRatingImage: audienceRatingImage ?? this.audienceRatingImage,
+      crew: crew ?? this.crew,
+      nfoPeople: nfoPeople ?? this.nfoPeople,
       tagline: tagline ?? this.tagline,
       originalTitle: originalTitle ?? this.originalTitle,
       editionTitle: editionTitle ?? this.editionTitle,
@@ -947,11 +1006,19 @@ class PlexMetadataDto {
   }
 }
 
+/// Plezy+: [MediaItem.raw] key of the crew list (see [PlexMetadataDto.crew]).
+const String plexCrewRawKey = 'plezyCrew';
+
+/// Plezy+: [MediaItem.raw] key of [PlexMetadataDto.nfoPeople].
+const String plexNfoPeopleRawKey = 'plezyNfoPeople';
+
 Map<String, Object?>? _rawMetadata(PlexMetadataDto dto) {
   final raw = <String, Object?>{};
   if (dto.key != null) raw['key'] = dto.key;
   if (dto.skipChildren != null) raw['skipChildren'] = dto.skipChildren;
   if (dto.flattenSeasons != null) raw['flattenSeasons'] = dto.flattenSeasons;
+  if (dto.crew != null) raw[plexCrewRawKey] = dto.crew;
+  if (dto.nfoPeople != null) raw[plexNfoPeopleRawKey] = dto.nfoPeople;
   return raw.isEmpty ? null : raw;
 }
 
@@ -964,10 +1031,9 @@ Map<String, Object?>? _rawMetadata(PlexMetadataDto dto) {
 /// detail responses yield up to four. Plex offers no listing parameter that
 /// includes the array, which is why cards stay shorter than detail screens.
 ///
-/// Entries are deduped on `(source, value)` because the array repeats whichever
-/// source the scalar pair was drawn from. Insertion order keeps the server's
-/// own headline first, so `ratings.first` matches the scalar `rating` the
-/// cards and sorts already use.
+/// When the `Rating[]` array is present it is used alone, in the server's
+/// order; the scalar pair only fills in for listings without the array.
+/// Entries are deduped on `(source, value)`.
 List<MediaRatingSource>? plexRatingSources({
   Object? rating,
   Object? ratingImage,
@@ -986,11 +1052,16 @@ List<MediaRatingSource>? plexRatingSources({
     ratings.add(MediaRatingSource(source: source, value: value, votes: source == 'imdb' ? imdbVotes : null));
   }
 
-  add(rating, fallbackSource: 'critic', image: ratingImage);
-  add(audienceRating, fallbackSource: 'audience', image: audienceRatingImage);
   for (final entry in ratingSources) {
     add(entry.value, fallbackSource: 'audience', image: entry.image, type: entry.type);
   }
+  // Plezy+: when the server sent the attributed Rating[] array, it alone is
+  // shown, as Plex's own apps do. The scalar pair can be rewritten by tools
+  // such as Kometa (another score under the original source's image) and
+  // would otherwise add mislabelled or duplicate badges in front.
+  if (ratings.isNotEmpty) return ratings;
+  add(rating, fallbackSource: 'critic', image: ratingImage);
+  add(audienceRating, fallbackSource: 'audience', image: audienceRatingImage);
   return ratings.isEmpty ? null : ratings;
 }
 
@@ -1133,7 +1204,7 @@ class PlexMappers {
       styles: dto.style,
       moods: dto.mood,
       roles: dto.role?.map(role).toList(),
-      mediaVersions: dto.mediaVersions?.map(mediaVersion).toList(),
+      mediaVersions: _namedFromFiles(dto.mediaVersions?.map(mediaVersion).toList()),
       libraryId: dto.librarySectionID?.toString(),
       libraryTitle: dto.librarySectionTitle,
       trailerKey: dto.primaryExtraKey,
@@ -1195,6 +1266,42 @@ class PlexMappers {
       deathDate: MediaPersonDetails.parseDate(json['diedAt']),
       birthPlace: _stringOrNull(json['birthPlace']),
     );
+  }
+
+  /// Plezy+: Plex has no version names; take them from the file names, the
+  /// part after the last " - " ("Buddy Buddy (1981) - 528p.mkv" → "528p").
+  /// Only for several versions and only when every version gets a distinct
+  /// name; otherwise the technical labels stay.
+  static List<MediaVersion>? _namedFromFiles(List<MediaVersion>? versions) {
+    if (versions == null || versions.length < 2) return versions;
+    String? nameOf(MediaVersion v) {
+      final path = v.parts.isEmpty ? null : v.parts.first.file;
+      if (path == null || path.isEmpty) return null;
+      var base = path.split(RegExp(r'[/\\]')).last;
+      final dot = base.lastIndexOf('.');
+      if (dot > 0) base = base.substring(0, dot);
+      final dash = base.lastIndexOf(' - ');
+      if (dash < 0) return null;
+      final name = base.substring(dash + 3).trim();
+      return name.isEmpty ? null : name;
+    }
+
+    final names = versions.map(nameOf).toList();
+    if (names.any((n) => n == null) || names.toSet().length != names.length) return versions;
+    return [
+      for (final (i, v) in versions.indexed)
+        MediaVersion(
+          id: v.id,
+          width: v.width,
+          height: v.height,
+          videoResolution: v.videoResolution,
+          videoCodec: v.videoCodec,
+          bitrate: v.bitrate,
+          container: v.container,
+          parts: v.parts,
+          name: names[i],
+        ),
+    ];
   }
 
   /// Map a parsed [PlexMediaVersionDto] into a [MediaVersion].

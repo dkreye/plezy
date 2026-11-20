@@ -85,6 +85,9 @@ class MediaVersion {
   /// "Director's Cut · 1080p H.264 MKV" apart from "Theatrical Cut · 1080p
   /// H.264 MKV" when the underlying tech specs collide.
   String get displayLabel {
+    // Plezy+: a version name (e.g. from the file name) says more than the
+    // technical details, so it stands alone.
+    if (name != null && name!.isNotEmpty) return name!;
     final parts = <String>[];
 
     if (videoResolution != null && videoResolution!.isNotEmpty) {

@@ -82,10 +82,10 @@ class NavigationTab {
 /// once a server or catalog source provides them.
 const startupSectionTabs = [
   NavigationTabId.discover,
+  NavigationTabId.search,
   NavigationTabId.libraries,
   NavigationTabId.liveTv,
   NavigationTabId.explore,
-  NavigationTabId.search,
 ];
 
 // Label getters (must be top-level for const constructor)
@@ -100,6 +100,8 @@ String _getSettingsLabel() => t.common.settings;
 /// All navigation tabs in display order
 const allNavigationTabs = [
   NavigationTab(id: NavigationTabId.discover, onlineOnly: true, icon: Symbols.home_rounded, getLabel: _getHomeLabel),
+  // Plezy+: search second, right next to home.
+  NavigationTab(id: NavigationTabId.search, onlineOnly: true, icon: Symbols.search_rounded, getLabel: _getSearchLabel),
   NavigationTab(
     id: NavigationTabId.libraries,
     onlineOnly: true,
@@ -113,7 +115,6 @@ const allNavigationTabs = [
     icon: Symbols.explore_rounded,
     getLabel: _getExploreLabel,
   ),
-  NavigationTab(id: NavigationTabId.search, onlineOnly: true, icon: Symbols.search_rounded, getLabel: _getSearchLabel),
   NavigationTab(
     id: NavigationTabId.downloads,
     onlineOnly: false,

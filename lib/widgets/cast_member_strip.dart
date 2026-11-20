@@ -162,11 +162,28 @@ class CastMemberStripState extends State<CastMemberStrip> {
     return KeyEventResult.ignored;
   }
 
+  /// Plezy+: gap + one name line + one secondary line + focus headroom.
+  static double _textAreaHeight(BuildContext context, TextStyle? name, TextStyle? secondary) {
+    final scaler = MediaQuery.textScalerOf(context);
+    double line(TextStyle? style) {
+      final size = style?.fontSize ?? 14;
+      return scaler.scale(size) * (style?.height ?? 1.43);
+    }
+
+    return 2 + line(name) + line(secondary) + 6;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final nameStyle = theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600);
-    final secondaryStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    // Plezy+: the captions of the poster rows (MediaCard): title w600 13/1.1,
+    // caption 11/1.1 muted, 2 px below the artwork, no gap between them.
+    const TextStyle? nameStyle = TextStyle(fontWeight: FontWeight.w600, fontSize: 13, height: 1.1);
+    final secondaryStyle = theme.textTheme.bodySmall?.copyWith(
+      fontSize: 11,
+      height: 1.1,
+      color: tokens(context).textMuted,
+    );
     final cardWidth = CastMemberStrip.responsiveCardWidth(context);
     final imageSize = cardWidth;
 
@@ -175,7 +192,9 @@ class CastMemberStripState extends State<CastMemberStrip> {
       descendantsAreFocusable: false,
       onKeyEvent: _handleKeyEvent,
       child: SizedBox(
-        height: CastMemberStrip.heightForCardWidth(cardWidth),
+        // Plezy+: one name line, and the text area sized to the real line
+        // heights, instead of a fixed 66 that left an empty band below.
+        height: cardWidth + CastMemberStrip._innerPadding * 2 + _textAreaHeight(context, nameStyle, secondaryStyle) + 10,
         child: HorizontalScrollWithArrows(
           controller: _scrollController,
           builder: (scrollController) => ListView.builder(
@@ -219,14 +238,13 @@ class CastMemberStripState extends State<CastMemberStrip> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 2),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(member.name, style: nameStyle, maxLines: 2, overflow: TextOverflow.ellipsis),
+                                Text(member.name, style: nameStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
                                 if (member.secondary != null) ...[
-                                  const SizedBox(height: 2),
                                   Text(
                                     member.secondary!,
                                     style: secondaryStyle,

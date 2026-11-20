@@ -110,7 +110,7 @@ Map<String, dynamic> plexFilterQueryParameters(Iterable<LibraryFilter> clauses) 
     final values = clause.values.where((value) => value.isNotEmpty).toList();
     if (clause.field.isEmpty || values.isEmpty) continue;
     final key = '${clause.field}${clause.op.wireSuffix}';
-    final value = values.join(',');
+    final value = values.map((value) => _plexInclusiveBound(clause.op, value)).join(',');
     final existing = params[key];
     if (existing == null) {
       params[key] = value;
@@ -121,6 +121,20 @@ Map<String, dynamic> plexFilterQueryParameters(Iterable<LibraryFilter> clauses) 
     }
   }
   return params;
+}
+
+/// Plezy+: Plex's `>>=` and `<<=` are strict ("is greater/less than"), while
+/// [LibraryFilterOperator.atLeast]/[LibraryFilterOperator.atMost] are
+/// inclusive. Integer bounds widen by one so `von 9 bis 10` keeps both 9 and
+/// 10; relative date windows (`-30d`) are not integers and pass unchanged.
+String _plexInclusiveBound(LibraryFilterOperator op, String value) {
+  final number = int.tryParse(value);
+  if (number == null) return value;
+  return switch (op) {
+    LibraryFilterOperator.atLeast => '${number - 1}',
+    LibraryFilterOperator.atMost => '${number + 1}',
+    _ => value,
+  };
 }
 
 /// Assemble the neutral [LibraryQuery] the library browse surfaces run.

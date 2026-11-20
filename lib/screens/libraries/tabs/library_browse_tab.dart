@@ -2169,7 +2169,7 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<MediaItem, LibraryBrows
       onGridGeometry: (geometry) {
         _scrollMetrics = LibraryAlphaScrollMetrics(
           columnCount: geometry.columnCount,
-          rowHeight: geometry.itemHeight + geometry.spacing,
+          rowHeight: geometry.itemHeight + geometry.rowSpacing,
           itemWidth: geometry.itemWidth,
           itemHeight: geometry.itemHeight,
         );

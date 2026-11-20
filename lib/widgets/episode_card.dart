@@ -95,12 +95,8 @@ class _EpisodeCardState extends State<EpisodeCard> with ContextMenuTapMixin<Epis
               child: AppIcon(Symbols.star_rounded, size: 12, fill: 1, color: Colors.amber),
             ),
             const SizedBox(width: 2),
-            Text(
-              (episode.userRating! / 2) == (episode.userRating! / 2).truncateToDouble()
-                  ? '${(episode.userRating! / 2).toInt()}'
-                  : formatRating(episode.userRating! / 2),
-              style: mutedStyle,
-            ),
+            // Plezy+: Plex's 0-10 scale, as everywhere else.
+            Text(formatRating(episode.userRating!), style: mutedStyle),
           ],
         ),
       );
