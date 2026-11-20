@@ -753,6 +753,24 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     throwIfHttpError(response);
   }
 
+  /// Plezy+: "Metadaten aktualisieren" for one item, as jellyfin-web's
+  /// refresh dialog in "Search for missing metadata" mode (the default in
+  /// Emby's as well): providers fill and update metadata and images, user
+  /// edits and locked fields stay.
+  Future<void> refreshItemMetadata(String itemId) async {
+    final response = await _http.post(
+      '/Items/${_segment(itemId)}/Refresh',
+      queryParameters: {
+        'Recursive': 'true',
+        'metadataRefreshMode': 'FullRefresh',
+        'imageRefreshMode': 'FullRefresh',
+        'replaceAllMetadata': 'false',
+        'replaceAllImages': 'false',
+      },
+    );
+    throwIfHttpError(response);
+  }
+
   /// Mirrors jellyfin-web's refresh dialog in "Scan for new and updated
   /// files" mode: `Default` refresh modes walk the folder for new, changed,
   /// and removed files and fill only missing metadata, unlike the
@@ -1820,6 +1838,18 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     AbortController? abort,
   }) async {
     final offset = start ?? 0;
+    // Plezy+: acting roles first, then crew roles (see PersonRoleSplitClient).
+    if (offset == 0) _plezyPersonCastCount.remove(personId);
+    try {
+      final split = await _plezyPersonRoles(personId, refresh: offset == 0, abort: abort);
+      if (split != null) {
+        final from = offset.clamp(0, split.length);
+        final to = size == null ? split.length : (from + size).clamp(from, split.length);
+        return LibraryPage<MediaItem>(items: split.sublist(from, to), totalCount: split.length, offset: from);
+      }
+    } catch (e, st) {
+      appLogger.w('Plezy+: splitting person roles failed', error: e, stackTrace: st);
+    }
     final pageSize = size ?? _pagedListPageSize;
     final response = await _http.get(
       '/Items',
@@ -1840,6 +1870,88 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     );
     throwIfHttpError(response);
     return _pagedItems(response.data, offset: offset, requestedSize: pageSize, map: _mapItems);
+  }
+
+  /// Plezy+: a show's crew from its episodes' People (a series lists its
+  /// cast only): directors and writers, most frequent first.
+  Future<List<Map<String, Object?>>> fetchShowCrew(String showId, {int limit = 20}) async {
+    const jobs = {'Director': 'director', 'Writer': 'writer'};
+    final response = await _http.get(
+      '/Shows/$showId/Episodes',
+      queryParameters: {'userId': connection.userId, 'Fields': 'People'},
+    );
+    throwIfHttpError(response);
+    final data = response.data;
+    final episodes = data is Map && data['Items'] is List ? data['Items'] as List : const [];
+    return showCrewFromEpisodes([
+      for (final episode in episodes)
+        [
+          if (episode is Map && episode['People'] is List)
+            for (final person in episode['People'] as List)
+              if (person is Map<String, dynamic> && jobs[person['Type']] != null && person['Name'] is String)
+                (
+                  name: person['Name'] as String,
+                  job: jobs[person['Type']]!,
+                  id: person['Id'] as String?,
+                  thumb: _absolutizeImagePath(JellyfinMappers.personImagePath(person)),
+                ),
+        ],
+    ], limit: limit);
+  }
+
+  /// Plezy+: per person id, the filmography split into acting and crew roles.
+  final Map<String, Future<List<MediaItem>?>> _plezyPersonRolesCache = {};
+  final Map<String, int> _plezyPersonCastCount = {};
+
+  int? personCastCount(String personId) => _plezyPersonCastCount[personId];
+
+  Future<List<MediaItem>?> _plezyPersonRoles(String personId, {required bool refresh, AbortController? abort}) {
+    final cached = _plezyPersonRolesCache[personId];
+    if (cached != null && !refresh) return cached;
+    Future<List<MediaItem>> roles(String types) async {
+      final response = await _http.get(
+        '/Items',
+        queryParameters: {
+          'userId': connection.userId,
+          'PersonIds': personId,
+          'PersonTypes': types,
+          'IncludeItemTypes': _personMediaItemTypes,
+          'Recursive': 'true',
+          'Limit': '2000',
+          'Fields': _browseFields,
+          'SortBy': 'PremiereDate,ProductionYear,SortName',
+          'SortOrder': 'Descending,Descending,Ascending',
+          'CollapseBoxSetItems': 'false',
+          ...jellyfinImageQueryParameters,
+        },
+        abort: abort,
+      );
+      throwIfHttpError(response);
+      final seen = <String>{};
+      return [
+        for (final item in _pagedItems(response.data, offset: 0, requestedSize: 2000, map: _mapItems).items)
+          if (seen.add(item.id)) item,
+      ];
+    }
+
+    Future<List<MediaItem>?> load() async {
+      final lists = await Future.wait([
+        roles('Actor,GuestStar'),
+        roles('Director,Writer,Producer,Composer,Creator,Editor'),
+      ]);
+      // Nothing in either: other role types only; keep the plain list.
+      if (lists[0].isEmpty && lists[1].isEmpty) return null;
+      _plezyPersonCastCount[personId] = lists[0].length;
+      return [...lists[0], ...lists[1]];
+    }
+
+    final future = load();
+    _plezyPersonRolesCache[personId] = future;
+    future.catchError((_) {
+      _plezyPersonRolesCache.remove(personId);
+      return null;
+    });
+    return future;
   }
 
   /// Not cached: [fetchItem] is the single writer of this endpoint's cache

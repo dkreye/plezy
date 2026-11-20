@@ -10,10 +10,11 @@ Persönliche Variante von [Plezy](https://github.com/edde746/plezy) mit Erweiter
 
 ## Änderungen
 
-Der Branch besteht aus zwei Commits auf der Basis:
+Der Branch besteht aus drei Commits auf der Basis:
 
 1. **Build und CI** – Workflow „Plezy+ APK“ und diese Doku
 2. **Quellcode** – Editionen-, Sammlungs- und Crew-Reihen, Filmografie über alle Rollen, Besetzung/Crew getrennt, Versionsnamen, Beschriftungen in den Dateiinformationen, Reihenabstand im Raster, Edition und Bewertungen, einheitliche Infozeilen, Suche direkt nach „Start“, Bereichsfilter mit Grenzen, eigene App-ID
+3. **Emby/Jellyfin, Serien-Crew** – Crew-Reihe, Besetzung/Crew und Beschriftungen auch für Emby/Jellyfin; Crew-Reihe für Serien aus den Folgen; „Metadaten aktualisieren“ für einzelne Einträge (alle Server)
 
 ### Detailseite: Editionen-Reihe
 - Alle Editionen eines Films (gleiche guid in derselben Bibliothek), Standard zuerst als `<Standard>`, die übrigen mit ihrem Editionsnamen.
@@ -27,13 +28,14 @@ Der Branch besteht aus zwei Commits auf der Basis:
 - Die Sammlungsreihen, die der Plex-Server selbst liefert, entfallen, sie wären doppelt.
 
 ### Detailseite: Crew
-- Nach der Besetzung eine Reihe „Crew“ (TV, Handy, Desktop) mit Regie, Drehbuch und Produktion: Foto, Name und Aufgabe, je Person einmal mit allen Aufgaben („Regie, Drehbuch“). Auswählen öffnet die Filmografie.
+- Nach der Besetzung eine Reihe „Crew“ (TV, Handy, Desktop) mit Regie, Drehbuch und Produktion: Foto, Name und Aufgabe, je Person einmal mit allen Aufgaben („Regie, Drehbuch“). Auswählen öffnet die Filmografie. Gilt für Plex und Emby/Jellyfin.
+- Serien tragen selbst keine Crew. Plezy+ zählt Regie und Drehbuch aus den Folgen und zeigt die häufigsten (höchstens 20) als Crew-Reihe der Serie, nach den übrigen Reihen nachgeladen (Plex und Emby/Jellyfin).
 - Die Info-Zeilen am Seitenende (Studio, Regie, Altersfreigabe) entfallen.
 
 ### Filmografie
 - Die Filmografie einer Person (aus Besetzung oder Crew) zeigt alle ihre Einträge, egal in welcher Rolle: Darsteller, Regie, Drehbuch, Produktion. Plex führt je Rolle ein eigenes Tag; Plezy+ sucht die übrigen Tags derselben Person und führt deren Filme zusammen, jeden Film einmal. Sortiert wird immer nach Jahr, neueste zuerst, innerhalb eines Jahres alphabetisch (auch bei nur einer Rolle).
 - Darsteller und Regie findet die Suche über die plex.tv-Personen-ID (`tagKey`), Drehbuch und Produktion die Listen `/library/sections/<id>/writer` bzw. `/producer` über gleichen Namen und gleiches Foto (diese Listen tragen keinen `tagKey`). Die Listen werden 30 Minuten zwischengespeichert.
-- Die Filmografie ist in die Abschnitte „Besetzung“ (Darsteller) und „Crew“ (Regie, Drehbuch, Produktion) geteilt, jeder mit Überschrift und für sich nach Jahr sortiert; ein Abschnitt ohne Einträge entfällt. Ein Film kann in beiden stehen.
+- Die Filmografie ist in die Abschnitte „Besetzung“ (Darsteller) und „Crew“ (Regie, Drehbuch, Produktion) geteilt, jeder mit Überschrift und für sich nach Jahr sortiert; ein Abschnitt ohne Einträge entfällt. Ein Film kann in beiden stehen. Bei Emby/Jellyfin zählen zur Crew zusätzlich Musik, Schnitt und Idee (Composer, Editor, Creator).
 - Schlägt das fehl, bleibt es bei den Einträgen der einen Rolle.
 
 ### Personen aus .nfo-Dateien
@@ -52,6 +54,11 @@ Der Branch besteht aus zwei Commits auf der Basis:
 - Der Gesehen-Haken ist 20 statt 24 Punkte groß, auf TV drei Viertel davon (15).
 - Die Symbole der Reihen in den Filmdetails richten sich nach der Art der Reihe: Editionen Schere, Sammlungen Bibliothek, „Ähnlich“ Sterne, „Mehr mit …“ Person.
 - Alle Infozeilen folgen derselben Reihenfolge: Jahr, Altersfreigabe, Laufzeit, (Auflösung usw.), eigene Bewertung, externe Bewertungen, Edition – TV-Detailzeile, TV-Kurzinfo, Detail-Kopf (Handy/Desktop, dort mit dem Knopf für die eigene Bewertung an dieser Stelle), Home-Hero, Kartenliste und Ordneransicht. Ausnahme ist die Kurzzeile unter Postern im Raster (Bewertung, Jahr, Laufzeit), damit die Bewertung nicht abgeschnitten wird.
+
+### Metadaten aktualisieren
+- Das Kontextmenü von Filmen, Serien, Staffeln und Folgen bietet „Metadaten aktualisieren“ (Plex, Emby, Jellyfin), wie bisher nur die Bibliothek als Ganzes. Sichtbar nur für Benutzer mit Verwaltungsrechten auf dem Server, also nicht für verwaltete Plex-Benutzer.
+- Plex: `PUT /library/metadata/<id>/refresh?force=1` wie Plex Web. Emby/Jellyfin: `/Items/<id>/Refresh` im Modus „Fehlende Metadaten suchen“ (Metadaten und Bilder vom Anbieter, eigene Änderungen bleiben), samt Staffeln und Folgen.
+- Der Server arbeitet im Hintergrund; die neuen Daten erscheinen beim nächsten Laden des Eintrags.
 
 ### Navigation
 - Die Suche steht in der Seitenleiste direkt unter „Start“ und in der unteren Leiste (Handy) direkt neben „Start“; der D-Pad-Fokus folgt derselben Reihenfolge.
@@ -79,7 +86,7 @@ Der Branch besteht aus zwei Commits auf der Basis:
 - Nur bei mehreren Versionen und nur, wenn jede Version einen eigenen, unterschiedlichen Namen ergibt; sonst bleiben die technischen Angaben. Benutzer mit eingeschränktem Zugriff bekommen von Plex keine Dateipfade und sehen ebenfalls die Technik.
 
 ### Dateiinformationen
-- Die Dateiinformationen zeigen über den Versionen die Beschriftungen des Eintrags (Plex-`Label`).
+- Die Dateiinformationen zeigen über den Versionen die Beschriftungen des Eintrags (Plex-`Label`, bei Emby/Jellyfin `Tags`).
 
 ### Android
 - App-ID `biz.kreye.plezy`, Name „Plezy+“. FileProvider- und Artwork-Provider-Authorities sind ebenfalls umbenannt, sonst scheitert die Installation neben dem Original.

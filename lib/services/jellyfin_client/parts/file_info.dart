@@ -35,7 +35,18 @@ MediaFileInfo? parseJellyfinFileInfoFromJson(Map<String, dynamic> json) {
       appLogger.w('Skipping malformed Jellyfin media source', error: error, stackTrace: stackTrace);
     }
   }
-  return versions.isEmpty ? null : MediaFileInfo(versions: versions);
+  if (versions.isEmpty) return null;
+  // Plezy+: the item's tags, shown as "Beschriftungen". Jellyfin sends
+  // `Tags` (strings), Emby only `TagItems` (name/id pairs).
+  final tags = json['Tags'] is List ? json['Tags'] as List : json['TagItems'];
+  return MediaFileInfo(
+    versions: versions,
+    labels: [
+      if (tags is List)
+        for (final tag in tags)
+          if ((tag is Map ? tag['Name'] : tag) case final String name when name.trim().isNotEmpty) name.trim(),
+    ],
+  );
 }
 
 MediaStreamDetails? _firstStreamOfKind(List<MediaStreamDetails> streams, MediaStreamKind kind) {

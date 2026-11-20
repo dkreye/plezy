@@ -21,6 +21,7 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_library.dart';
 import '../media/media_person.dart';
+import '../media/plezy_plus.dart';
 import '../media/media_role.dart';
 import '../media/media_playlist.dart';
 import '../media/ids.dart';
@@ -403,7 +404,13 @@ class PlexClient
         _PlexCollectionMethods,
         _PlexPlayQueueMethods,
         _PlexMetadataEditMethods
-    implements MediaServerClient, ScopedMediaServerClient, GracefullyCloseable {
+    implements
+        MediaServerClient,
+        ScopedMediaServerClient,
+        GracefullyCloseable,
+        PersonRoleSplitClient,
+        ShowCrewClient,
+        ItemMetadataRefreshClient {
   @override
   PlexConfig config;
 
@@ -2755,6 +2762,15 @@ class PlexClient
   @override
   Future<void> refreshLibraryMetadata(String sectionId) async {
     await _getWithFailover('/library/sections/$sectionId/refresh?force=1');
+  }
+
+  /// Plezy+: "Metadaten aktualisieren" for one item, as in Plex Web
+  /// (`PUT /library/metadata/{id}/refresh?force=1`; recurses into seasons
+  /// and episodes).
+  @override
+  Future<void> refreshItemMetadata(String itemId) async {
+    final response = await _http.put('/library/metadata/$itemId/refresh', queryParameters: {'force': '1'});
+    throwIfHttpError(response);
   }
 
   Future<void> emptyLibraryTrash(String sectionId) async {

@@ -50,7 +50,7 @@ import '../widgets/optimized_media_image.dart';
 import '../utils/media_image_helper.dart';
 import '../utils/media_quality_labels.dart';
 import '../services/plex_client.dart';
-import '../services/plex_mappers.dart' show plexCrewRawKey;
+import '../media/plezy_plus.dart';
 import '../media/media_server_client.dart';
 import '../services/media_list_playback_launcher.dart';
 import '../utils/content_utils.dart';
@@ -1849,6 +1849,9 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       unawaited(
         _loadRelatedHubs().catchError((Object _) {}).then((_) {
           if (plex != null && _canUseDetail) unawaited(_fillNamesakePhotos(plex, _fullMetadata ?? base));
+          if (base.isShow && client is ShowCrewClient && _crewRoles(_metadata).isEmpty) {
+            unawaited(_loadShowCrew(client as ShowCrewClient, base.id));
+          }
         }),
       );
     } catch (e) {
@@ -1888,6 +1891,23 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       appLogger.d('Plezy+: namesake photos failed', error: e);
     }
   }
+
+  /// Plezy+: a show carries no crew of its own; gather it from the episodes.
+  Future<void> _loadShowCrew(ShowCrewClient client, String showId) async {
+    try {
+      final crew = await client.fetchShowCrew(showId);
+      if (!_canUseDetail || crew.isEmpty || _metadata.id != showId) return;
+      setState(() {
+        _showCrew = crew;
+        _crewRolesCache = null;
+      });
+    } catch (e) {
+      appLogger.d('Plezy+: show crew failed', error: e);
+    }
+  }
+
+  /// Plezy+: crew of a show, from [_loadShowCrew].
+  List<Map<String, Object?>>? _showCrew;
 
   Future<void> _loadSeasons() async {
     if (!_canUseDetail) return;
@@ -4615,7 +4635,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   List<MediaRole> _crewRoles(MediaItem metadata) {
     final cached = _crewRolesCache;
     if (cached != null && identical(cached.$1, metadata)) return cached.$2;
-    final raw = metadata.raw?[plexCrewRawKey];
+    final ownCrew = metadata.raw?[mediaCrewRawKey];
+    final raw = ownCrew is List && ownCrew.isNotEmpty ? ownCrew : (metadata.isShow ? _showCrew : null);
     if (raw is! List) return const [];
     final de = LocaleSettings.currentLocale == AppLocale.de;
     String jobLabel(Object? job) => switch (job) {
