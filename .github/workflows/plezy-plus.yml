@@ -1,0 +1,71 @@
+# Baut die Plezy+-APKs (arm64-v8a und armeabi-v7a) fuer den Sideload.
+# Start: Actions -> "Plezy+ APK" -> Run workflow, oder Push auf den Branch plezy-plus.
+# Signierung: Mit den Repository-Secrets ANDROID_KEYSTORE_BASE64, ANDROID_STORE_PASSWORD,
+# ANDROID_KEY_PASSWORD und ANDROID_KEY_ALIAS wird immer mit demselben Schluessel signiert,
+# sodass Updates per "adb install -r" funktionieren. Ohne diese Secrets bricht der Build ab
+# (Release-Builds blieben sonst unsigniert und liessen sich nicht installieren).
+name: Plezy+ APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [plezy-plus]
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.47.1"
+          cache: true
+
+      - run: flutter pub get --enforce-lockfile --no-example
+
+      - name: Signierschluessel pruefen
+        if: env.KEYSTORE == ''
+        run: |
+          echo "::error::Secret ANDROID_KEYSTORE_BASE64 fehlt - ohne Schluessel waere die APK unsigniert und nicht installierbar."
+          exit 1
+
+      - name: Signierung einrichten
+        run: |
+          echo "$KEYSTORE" | base64 --decode > android/app/upload-keystore.jks
+          cat > android/key.properties << EOF2
+          storePassword=${{ secrets.ANDROID_STORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          storeFile=upload-keystore.jks
+          EOF2
+
+      # Der Build laedt mehrere Bibliotheken (FFmpeg-Header, libass, mpv) nach;
+      # einzelne Downloads scheitern gelegentlich, daher bis zu drei Versuche.
+      - name: APKs bauen
+        run: |
+          for i in 1 2 3; do
+            flutter build apk --release --split-per-abi --dart-define=GIT_COMMIT=${{ github.sha }} && exit 0
+            echo "::warning::Build-Versuch $i fehlgeschlagen"
+            sleep 30
+          done
+          exit 1
+
+      - name: APKs benennen
+        run: |
+          mkdir -p out
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk out/plezy-plus-arm64-v8a.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk out/plezy-plus-armeabi-v7a.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plezy-plus-apk
+          path: out/*.apk
