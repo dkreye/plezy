@@ -95,8 +95,9 @@ void main() {
         ),
       );
       expect(params['genre!'], 'Comedy');
-      expect(params['year>>'], '2015');
-      expect(params['year<<'], '2018');
+      // Plezy+: Plex's >>/<< are strict, so inclusive bounds widen by one.
+      expect(params['year>>'], '2014');
+      expect(params['year<<'], '2019');
       expect(params['title='], 'Wicked');
       expect(params['title<'], 'Wick');
     });

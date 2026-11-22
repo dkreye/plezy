@@ -50,6 +50,7 @@ import '../widgets/optimized_media_image.dart';
 import '../utils/media_image_helper.dart';
 import '../utils/media_quality_labels.dart';
 import '../services/plex_client.dart';
+import '../services/plex_mappers.dart' show plexCrewRawKey;
 import '../media/media_server_client.dart';
 import '../services/media_list_playback_launcher.dart';
 import '../utils/content_utils.dart';
@@ -143,6 +144,7 @@ const String _tvDetailSeasonsErrorHubId = 'detail_seasons_error';
 const String _tvDetailSeasonHubIdPrefix = 'detail_season_';
 const String _tvDetailExtrasHubId = 'detail_extras';
 const String _tvDetailActorsHubId = 'detail_actors';
+const String _tvDetailCrewHubId = 'detail_crew';
 const String _tvDetailActorPersonIdRawKey = 'tvDetailActorPersonId';
 
 enum _SyncRuleAction { edit, remove, delete }
@@ -507,6 +509,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
   final _castStripKey = GlobalKey<CastMemberStripState>();
   final _castSectionKey = GlobalKey();
+  final _crewStripKey = GlobalKey<CastMemberStripState>();
+  final _crewSectionKey = GlobalKey();
   final _seasonsSectionKey = GlobalKey();
 
   // Focus target for the trailing info rows (studio / contentRating)
@@ -1266,7 +1270,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   /// mirroring [FittedMetadataLine]'s policy — instead of wrapping onto a
   /// second run that short heroes clip away entirely: the scores pill sheds
   /// one badge at a time from the end, then quality labels go rightmost-first,
-  /// then the Plex edition, certification, runtime, and finally the year. The
+  /// then certification, runtime, and finally the year and the Plex edition. The
   /// tappable user-rating chip is the strip's only interactive element and is
   /// never dropped.
   ///
@@ -1283,7 +1287,32 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     double maxWidth, {
     required List<MediaRatingSource> ratings,
     bool scoresOnly = false,
+    bool includeEdition = true,
+    bool editionOnly = false,
+  }) => _fitHeroChips(
+    context,
+    metadata,
+    maxWidth,
+    ratings: ratings,
+    scoresOnly: scoresOnly,
+    includeEdition: includeEdition,
+    editionOnly: editionOnly,
+  ).chips;
+
+  /// Plezy+: [_buildFittedHeroChips] plus the number of units it had to shed,
+  /// so the compact hero can tell whether the edition costs the strip a chip.
+  /// [includeEdition] false leaves the edition out of the strip;
+  /// [editionOnly] builds just the edition chip, for a row of its own.
+  ({List<Widget> chips, int dropped}) _fitHeroChips(
+    BuildContext context,
+    MediaItem metadata,
+    double maxWidth, {
+    required List<MediaRatingSource> ratings,
+    bool scoresOnly = false,
+    bool includeEdition = true,
+    bool editionOnly = false,
   }) {
+    final mainStrip = !scoresOnly && !editionOnly;
     final colorScheme = Theme.of(context).colorScheme;
     final textScaler = MediaQuery.textScalerOf(context);
     final textDirection = Directionality.of(context);
@@ -1321,16 +1350,18 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       ));
     }
 
-    if (!scoresOnly) {
+    if (mainStrip) {
       if (metadata.year != null) addTextChip('${metadata.year}', 0);
-      if (metadata case PlexMediaItem(:final editionTitle?)) addTextChip(editionTitle, 3);
       if (metadata.contentRating != null) addTextChip(formatContentRating(metadata.contentRating!), 2);
       if (metadata.durationMs != null) addTextChip(formatDurationTextual(metadata.durationMs!), 1);
       for (final label in buildMediaQualityLabels(metadata)) {
         addTextChip(label, 4);
       }
     }
-    if (ratings.isNotEmpty) {
+    // Plezy+: the own-rating chip sits where the TV line has the own rating,
+    // after the runtime and quality labels and before the scores.
+    final userRatingChipIndex = slots.length;
+    if (ratings.isNotEmpty && !editionOnly) {
       // Every attributed score shares one pill rather than taking a chip
       // each, so a long score list can't crowd out the year, certification,
       // and runtime.
@@ -1370,12 +1401,15 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         ),
       ));
     }
-
+    // The Plex edition closes the strip, after the scores; shed last.
+    if ((mainStrip && includeEdition) || editionOnly) {
+      if (metadata case PlexMediaItem(:final editionTitle?)) addTextChip(editionTitle, 0);
+    }
     // The user-rating chip always survives, but its width still counts
     // against the budget so dropping other chips actually makes room for it.
     Widget? userRatingChip;
     var userRatingChipWidth = 0.0;
-    if (!scoresOnly && !widget.isOffline) {
+    if (mainStrip && !widget.isOffline) {
       userRatingChip = _buildUserRatingChip(metadata);
       userRatingChipWidth =
           chipPadding +
@@ -1416,11 +1450,20 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       }
     }
 
-    return [
-      for (var index = 0; index < slots.length; index++)
-        if (keptUnits[index] > 0) slots[index].build(keptUnits[index]),
-      ?userRatingChip,
-    ];
+    var dropped = 0;
+    for (var index = 0; index < slots.length; index++) {
+      dropped += slots[index].unitWidths.length - keptUnits[index];
+    }
+    return (
+      chips: [
+        for (var index = 0; index < slots.length; index++) ...[
+          if (index == userRatingChipIndex) ?userRatingChip,
+          if (keptUnits[index] > 0) slots[index].build(keptUnits[index]),
+        ],
+        if (userRatingChipIndex == slots.length) ?userRatingChip,
+      ],
+      dropped: dropped,
+    );
   }
 
   /// Numeric backends show the formatted rating when set; favorite backends
@@ -1429,7 +1472,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   String _userRatingChipLabel(MediaItem metadata) {
     final isNumeric = _getMediaClientForMetadata(context)?.capabilities.numericUserRating ?? true;
     final hasRating = metadata.userRating != null && metadata.userRating! > 0;
-    return isNumeric && hasRating ? formatRating(metadata.userRating! / 2.0) : t.mediaMenu.rate;
+    // Plezy+: Plex's 0-10 scale, as in the TV detail line.
+    return isNumeric && hasRating ? formatRating(metadata.userRating!) : t.mediaMenu.rate;
   }
 
   Widget _buildUserRatingChip(MediaItem metadata) {
@@ -1799,7 +1843,14 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       // [_loadExtras] and [_loadRelatedHubs] short-circuit for non-Plex
       // backends; safe to call unconditionally.
       unawaited(_loadExtras());
-      unawaited(_loadRelatedHubs());
+      // Plezy+: .nfo photos only after the related rows, so their searches do
+      // not hold up the page.
+      final plex = client is PlexClient ? client : null;
+      unawaited(
+        _loadRelatedHubs().catchError((Object _) {}).then((_) {
+          if (plex != null && _canUseDetail) unawaited(_fillNamesakePhotos(plex, _fullMetadata ?? base));
+        }),
+      );
     } catch (e) {
       // Fallback to passed metadata on error
       if (!_canUseDetail) return;
@@ -1817,6 +1868,24 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         _showEpisodesDirectly = true;
         unawaited(_fetchAllEpisodes());
       }
+    }
+  }
+
+  /// Plezy+: photos for cast and crew from local .nfo files, which Plex
+  /// leaves without one.
+  Future<void> _fillNamesakePhotos(PlexClient client, MediaItem item) async {
+    var shown = item;
+    void show(MediaItem filled) {
+      if (!_canUseDetail || !identical(_fullMetadata, shown)) return;
+      shown = filled;
+      setState(() => _fullMetadata = filled);
+    }
+
+    try {
+      final filled = await client.withNamesakePhotos(item, onUpdate: show);
+      if (filled != null) show(filled);
+    } catch (e) {
+      appLogger.d('Plezy+: namesake photos failed', error: e);
     }
   }
 
@@ -2384,10 +2453,10 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     }
   }
 
-  bool get _hasInfoRows {
-    final metadata = _metadata;
-    return metadata.studio != null || metadata.directors?.isNotEmpty == true || metadata.contentRating != null;
-  }
+  // Plezy+: the trailing info rows (studio, directors, certification) are
+  // gone: the crew row names the directors and the certification sits in the
+  // metadata line.
+  bool get _hasInfoRows => false;
 
   /// Focus the trailing info rows (studio / directors / contentRating) and scroll them into view.
   void _focusInfoRows() {
@@ -2886,6 +2955,13 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }
 
   IconData _getRelatedHubIcon(MediaHub hub) {
+    // Plezy+: by the kind of row first; the title rules below only know
+    // English titles and miss Plezy+'s own rows (named after the collection).
+    final identifier = hub.identifier?.toLowerCase() ?? '';
+    if (identifier == editionsHubIdentifier) return Symbols.content_cut_rounded;
+    if (identifier == 'plezy.collection' || identifier.contains('collection')) return Symbols.video_library_rounded;
+    if (identifier.contains('similar')) return Symbols.auto_awesome_rounded;
+    if (identifier.contains('actor') || identifier.contains('director')) return Symbols.person_rounded;
     final lower = hub.title.toLowerCase();
     if (lower.contains('collection')) return Symbols.video_library_rounded;
     if (lower.contains('similar')) return Symbols.auto_awesome_rounded;
@@ -3444,7 +3520,11 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     final isMobile = PlatformDetector.isMobile(context);
     final isTv = PlatformDetector.isTV();
     final theme = Theme.of(context);
-    final sectionTitleStyle = theme.textTheme.titleLarge?.copyWith(fontWeight: .bold, fontSize: isTv ? 28 : null);
+    // Plezy+: same as the related rows' headers (HubSection).
+    final sectionTitleStyle = theme.textTheme.titleLarge?.copyWith(
+      fontWeight: isTv ? FontWeight.w700 : null,
+      fontSize: isTv ? 26 : null,
+    );
 
     // Show loading state while fetching full metadata
     if (_isLoadingMetadata) {
@@ -3493,10 +3573,12 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     // not, and without it the budget shrinks the logo away.
     final size = MediaQuery.sizeOf(context);
     final viewPadding = MediaQuery.paddingOf(context);
+    final compactHero = _isCompactHero(size.width - viewPadding.horizontal - _heroSideInset * 2);
+    // Plezy+: plus one for the edition's own row on the compact hero.
     final heroChipRows =
-        _isCompactHero(size.width - viewPadding.horizontal - _heroSideInset * 2) && _titleRatings(metadata).isNotEmpty
-        ? 3
-        : 2;
+        2 +
+        (compactHero && _titleRatings(metadata).isNotEmpty ? 1 : 0) +
+        (compactHero && metadata.editionTitle != null ? 1 : 0);
     final heroFloor = isTv
         ? 0.0
         : viewPadding.top +
@@ -3635,10 +3717,26 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
 
                               // Cast
                               if (metadata.roles != null && metadata.roles!.isNotEmpty) ...[
-                                Text(key: _castSectionKey, t.discover.cast, style: sectionTitleStyle),
-                                const SizedBox(height: 12),
+                                _plezySectionTitle(
+                                  Text(key: _castSectionKey, t.discover.cast, style: sectionTitleStyle),
+                                  Symbols.group_rounded,
+                                ),
+                                // Plezy+: same rhythm as the related rows below.
+                                SizedBox(height: isTv ? 12 : 2),
                                 _buildCastSection(metadata),
-                                SizedBox(height: isTv ? 24 : 12),
+                                SizedBox(height: isTv ? 24 : 4),
+                              ],
+
+                              // Plezy+: crew (directors, writers, producers)
+                              if (_crewRoles(metadata).isNotEmpty) ...[
+                                _plezySectionTitle(
+                                  Text(key: _crewSectionKey, 'Crew', style: sectionTitleStyle),
+                                  Symbols.videocam_rounded,
+                                ),
+                                // Plezy+: same rhythm as the related rows below.
+                                SizedBox(height: isTv ? 12 : 2),
+                                _buildCrewSection(metadata),
+                                SizedBox(height: isTv ? 24 : 4),
                               ],
 
                               // Trailers & Extras Section
@@ -3854,6 +3952,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
               onBack: _popMediaDetailIfBackNotSuppressed,
               tallPosterScale: _tvDetailTallPosterScale,
               widePosterScaleForHub: _tvDetailWidePosterScaleForHub,
+              // Plezy+: tighter, uniform rows (room for the 2 % focus scale-up).
+              railBottomPaddingForHub: (_) => 6,
               initialHubId: _tvDetailInitialHubId(metadata),
               initialItemId: _tvDetailInitialItemId(metadata),
               episodePosterModeForHub: _tvDetailEpisodePosterModeForHub,
@@ -4113,8 +4213,8 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
   }
 
   /// The ordered metadata fields the TV detail line renders and its announcement
-  /// reads: year first (the desktop hero's chip order) and every score in one
-  /// trailing slot. Drop priorities let the fitted line shed surplus rating
+  /// reads: year first (the desktop hero's chip order), the viewer's own
+  /// rating, every source score in one slot, and the Plex edition last. Drop priorities let the fitted line shed surplus rating
   /// badges before the fields that identify the item (#1893). Stream quality
   /// labels stay off the hero line: they describe the file, not the title,
   /// and remain on the rail cards and in the details sheet (#2217).
@@ -4139,9 +4239,22 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     final episodeRatings = focusedEpisode == null
         ? const <MediaRatingSource>[]
         : mediaRatingsFor(_withProbedRatings(focusedEpisode));
+    // The viewer's own rating leads the scores in a slot of its own, with the
+    // amber star of the rating chip, so it stands apart from the sources. It
+    // keeps Plex's 0-10 scale, like the source scores beside it.
+    final userRating = lineMetadata.userRating;
+    if (userRating != null && userRating > 0) {
+      parts.add(
+        MetadataLineIconText(Symbols.star_rounded, formatRating(userRating), dropPriority: 0, iconColor: Colors.amber),
+      );
+    }
     // An episode without scores of its own shows the title's.
     final ratings = episodeRatings.isNotEmpty ? episodeRatings : _titleRatings(metadata);
     if (ratings.isNotEmpty) parts.add(MetadataLineRatings(ratings, dropPriority: 4));
+    // The Plex edition closes the line, after the scores.
+    if (!lineMetadata.isEpisode && lineMetadata.editionTitle != null) {
+      parts.add(MetadataLineText(lineMetadata.editionTitle!, dropPriority: 0));
+    }
 
     return parts;
   }
@@ -4426,11 +4539,17 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         );
       }
     }
+    // The editions row leads the rows below the hero, ahead of the cast.
+    hubs.addAll(_relatedHubs.where((hub) => hub.identifier == editionsHubIdentifier && hub.items.isNotEmpty));
     final actors = _tvDetailActorItems(metadata);
     if (actors.isNotEmpty) {
       hubs.add(
         MediaHub(id: _tvDetailActorsHubId, title: t.discover.cast, type: 'person', items: actors, size: actors.length),
       );
+    }
+    final crew = _tvDetailCrewItems(metadata);
+    if (crew.isNotEmpty) {
+      hubs.add(MediaHub(id: _tvDetailCrewHubId, title: 'Crew', type: 'person', items: crew, size: crew.length));
     }
     if (_extras != null && _extras!.isNotEmpty) {
       hubs.add(
@@ -4443,7 +4562,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         ),
       );
     }
-    hubs.addAll(_relatedHubs.where((hub) => hub.items.isNotEmpty));
+    hubs.addAll(_relatedHubs.where((hub) => hub.identifier != editionsHubIdentifier && hub.items.isNotEmpty));
     return hubs;
   }
 
@@ -4482,10 +4601,64 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     return items;
   }
 
-  MediaItem _tvDetailActorItem(MediaItem metadata, MediaRole actor, int index) {
+  /// Plezy+: directors, writers and producers, one entry per person with all
+  /// of their jobs as [MediaRole.role] ("Regie, Drehbuch"), in that order.
+  /// Plezy+: section title with the icon of the matching TV row.
+  Widget _plezySectionTitle(Text title, IconData icon) => Row(
+    children: [
+      AppIcon(icon, fill: 1, size: PlatformDetector.isTV() ? 28 : null),
+      SizedBox(width: PlatformDetector.isTV() ? 12 : 8),
+      Flexible(child: title),
+    ],
+  );
+
+  List<MediaRole> _crewRoles(MediaItem metadata) {
+    final cached = _crewRolesCache;
+    if (cached != null && identical(cached.$1, metadata)) return cached.$2;
+    final raw = metadata.raw?[plexCrewRawKey];
+    if (raw is! List) return const [];
+    final de = LocaleSettings.currentLocale == AppLocale.de;
+    String jobLabel(Object? job) => switch (job) {
+      'director' => de ? 'Regie' : 'Director',
+      'writer' => de ? 'Drehbuch' : 'Writer',
+      'producer' => de ? 'Produktion' : 'Producer',
+      _ => '',
+    };
+    final people = <String, ({String? id, String name, String? thumb, List<String> jobs})>{};
+    for (final entry in raw) {
+      if (entry is! Map) continue;
+      final name = entry['tag']?.toString() ?? '';
+      if (name.isEmpty) continue;
+      final id = entry['id']?.toString();
+      final job = jobLabel(entry['job']);
+      final existing = people[id ?? name];
+      if (existing != null) {
+        if (job.isNotEmpty && !existing.jobs.contains(job)) existing.jobs.add(job);
+        continue;
+      }
+      people[id ?? name] = (id: id, name: name, thumb: entry['thumb']?.toString(), jobs: [if (job.isNotEmpty) job]);
+    }
+    final roles = [
+      for (final p in people.values) MediaRole(id: p.id, tag: p.name, role: p.jobs.join(', '), thumbPath: p.thumb),
+    ];
+    _crewRolesCache = (metadata, roles);
+    return roles;
+  }
+
+  (MediaItem, List<MediaRole>)? _crewRolesCache;
+
+  /// Plezy+: the crew as person cards for the TV detail rows.
+  List<MediaItem> _tvDetailCrewItems(MediaItem metadata) {
+    final crew = _crewRoles(metadata);
+    return [for (var i = 0; i < crew.length; i++) _tvDetailActorItem(metadata, crew[i], i, idPrefix: 'crew')];
+  }
+
+  MediaItem _tvDetailActorItem(MediaItem metadata, MediaRole actor, int index, {String idPrefix = 'actor'}) {
     final personId = actor.id?.trim();
     return MediaItem(
-      id: personId != null && personId.isNotEmpty ? '${metadata.id}_actor_$personId' : '${metadata.id}_actor_$index',
+      id: personId != null && personId.isNotEmpty
+          ? '${metadata.id}_${idPrefix}_$personId'
+          : '${metadata.id}_${idPrefix}_$index',
       backend: metadata.backend,
       kind: MediaKind.unknown,
       title: actor.tag,
@@ -4508,7 +4681,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       );
       return true;
     }
-    if (hub.id != _tvDetailActorsHubId) return false;
+    if (hub.id != _tvDetailActorsHubId && hub.id != _tvDetailCrewHubId) return false;
     final personId = item.raw?[_tvDetailActorPersonIdRawKey];
     if (personId is String && personId.isNotEmpty) {
       _navigateToActorMedia(
@@ -4667,6 +4840,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
     if (hub.id == 'detail_episodes') return Symbols.tv_rounded;
     if (hub.id == _tvDetailExtrasHubId) return Symbols.theaters_rounded;
     if (hub.id == _tvDetailActorsHubId) return Symbols.group_rounded;
+    if (hub.id == _tvDetailCrewHubId) return Symbols.videocam_rounded;
     return _getRelatedHubIcon(hub);
   }
 
@@ -4833,18 +5007,38 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
         // a hero too short for it keeps them in the strip's pill instead.
         final ratings = _titleRatings(metadata);
         final scoresRow = centered && ratings.isNotEmpty && chipsFit && roomForRow(chipHeight);
+        final stripRatings = scoresRow ? const <MediaRatingSource>[] : ratings;
+        // Plezy+: the compact hero also gives the edition a row of its own
+        // (below the scores) when it would cost the strip a chip.
+        var editionRow = false;
+        if (centered && chipsFit && metadata.editionTitle != null) {
+          final rowsAbove = scoresRow ? 2 * chipHeight + rowGap : chipHeight;
+          editionRow =
+              roomForRow(rowsAbove) &&
+              _fitHeroChips(context, metadata, constraints.maxWidth, ratings: stripRatings).dropped >
+                  _fitHeroChips(
+                    context,
+                    metadata,
+                    constraints.maxWidth,
+                    ratings: stripRatings,
+                    includeEdition: false,
+                  ).dropped;
+        }
         // Fitted to a single run each: chips shed by usefulness instead of
         // wrapping onto a second run the height clip below would hide.
         final strip = _buildFittedHeroChips(
           context,
           metadata,
           constraints.maxWidth,
-          ratings: scoresRow ? const [] : ratings,
+          ratings: stripRatings,
+          includeEdition: !editionRow,
         );
         final chipRows = [
           if (strip.isNotEmpty) strip,
           if (scoresRow)
             _buildFittedHeroChips(context, metadata, constraints.maxWidth, ratings: ratings, scoresOnly: true),
+          if (editionRow)
+            _buildFittedHeroChips(context, metadata, constraints.maxWidth, ratings: const [], editionOnly: true),
         ];
         // Genres render on their own line below the metadata chips.
         final genreChips = [for (final genre in metadata.genres ?? const <String>[]) _buildMetadataChip(genre)];
@@ -4954,8 +5148,35 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
       members: [for (final actor in roles) (name: actor.tag, secondary: actor.role, imagePath: actor.thumbPath)],
       imageClient: getServerBoundMediaClient(context),
       onNavigateUp: _focusSectionDirectlyAboveCast,
-      onNavigateDown: _focusSectionBelowCast,
+      onNavigateDown: _crewRoles(metadata).isNotEmpty ? _focusCrewSection : _focusSectionBelowCast,
       onMemberTap: (index) => _navigateToActorMedia(roles[index]),
+    );
+  }
+
+  void _focusCrewSection() {
+    _crewStripKey.currentState?.requestFocus();
+    _scrollSectionIntoView(_crewSectionKey);
+  }
+
+  void _focusCastFromCrew() {
+    final roles = _metadata.roles;
+    if (roles != null && roles.isNotEmpty) {
+      _castStripKey.currentState?.requestFocus();
+      _scrollSectionIntoView(_castSectionKey);
+    } else {
+      _focusSectionDirectlyAboveCast();
+    }
+  }
+
+  Widget _buildCrewSection(MediaItem metadata) {
+    final crew = _crewRoles(metadata);
+    return CastMemberStrip(
+      key: _crewStripKey,
+      members: [for (final person in crew) (name: person.tag, secondary: person.role, imagePath: person.thumbPath)],
+      imageClient: getServerBoundMediaClient(context),
+      onNavigateUp: _focusCastFromCrew,
+      onNavigateDown: _focusSectionBelowCast,
+      onMemberTap: (index) => _navigateToActorMedia(crew[index]),
     );
   }
 

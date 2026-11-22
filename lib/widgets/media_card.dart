@@ -32,6 +32,9 @@ import '../utils/media_image_helper.dart';
 import '../utils/platform_detector.dart';
 import '../utils/provider_extensions.dart';
 import '../utils/formatters.dart';
+import 'fitted_metadata_line.dart';
+import 'media_rating_badge.dart';
+import 'star_tinted_text.dart';
 import '../utils/media_navigation_helper.dart';
 import '../utils/snackbar_helper.dart';
 import '../theme/mono_tokens.dart';
@@ -99,6 +102,12 @@ String _buildMediaMetadataLine(MediaItem item, {CatalogItem? catalogItem, bool c
   }
 
   String? ratingPart() {
+    // Plezy+: library items show the viewer's own rating (0-10) instead of
+    // the listing's unattributed score; catalog entries keep their source's.
+    if (catalogItem == null) {
+      final own = item.userRating;
+      return own != null && own > 0 ? '${formatRating(own)}★' : null;
+    }
     if (item.rating case final rating?) {
       final votes = compact ? null : catalogItem?.votes;
       final voteSuffix = votes != null && votes > 0 ? ' (${_formatCompactCatalogNumber(votes)})' : '';
@@ -118,10 +127,12 @@ String _buildMediaMetadataLine(MediaItem item, {CatalogItem? catalogItem, bool c
     final formatted = formatContentRating(contentRating);
     if (formatted.isNotEmpty) parts.add(formatted);
   }
-  if (item.year case final year?) parts.add('$year');
-  if (item.editionTitle case final editionTitle?) parts.add(editionTitle);
+  // Plezy+: the detail line's order: year, certification, runtime, rating,
+  // edition.
+  if (item.year case final year?) parts.insert(0, '$year');
   if (item.durationMs case final durationMs?) parts.add(formatDurationTextual(durationMs));
   if (ratingPart() case final rating?) parts.add(rating);
+  if (item.editionTitle case final editionTitle?) parts.add(editionTitle);
 
   if (catalogItem != null) {
     final genres = catalogItem.genres;
@@ -133,6 +144,28 @@ String _buildMediaMetadataLine(MediaItem item, {CatalogItem? catalogItem, bool c
   final studio = item.studio ?? catalogItem?.network;
   if (studio != null && studio.isNotEmpty) parts.add(studio);
   return parts.join(' • ');
+}
+
+/// Plezy+: the list row's line for a library item, as the TV detail line:
+/// year, certification, runtime, own rating, the attributed scores, edition.
+/// No studio. A tight row sheds scores first, then certification and
+/// runtime; year, own rating and edition last. Null where the row keeps the
+/// text line (catalog entries, collections).
+List<MetadataLinePart>? _plezyListMetadataParts(MediaItem item, {CatalogItem? catalogItem}) {
+  if (catalogItem != null || item.kind == MediaKind.collection) return null;
+  final ratings = mediaRatingsFor(item);
+  final userRating = item.userRating;
+  return [
+    if (item.year case final year?) MetadataLineText('$year', dropPriority: 0),
+    if (item.contentRating case final contentRating? when formatContentRating(contentRating).isNotEmpty)
+      MetadataLineText(formatContentRating(contentRating), dropPriority: 2),
+    if (item.durationMs case final durationMs? when durationMs > 0)
+      MetadataLineText(formatDurationTextual(durationMs), dropPriority: 1),
+    if (userRating != null && userRating > 0)
+      MetadataLineIconText(Symbols.star_rounded, formatRating(userRating), dropPriority: 0, iconColor: Colors.amber),
+    if (ratings.isNotEmpty) MetadataLineRatings(ratings, dropPriority: 4),
+    if (item.editionTitle case final edition?) MetadataLineText(edition, dropPriority: 0),
+  ];
 }
 
 /// The single announcement used for a media card.
@@ -880,6 +913,13 @@ class _MediaCardList extends StatelessWidget {
   Widget build(BuildContext context) {
     final metadataLine = _buildMetadataLine();
     final subtitle = _buildSubtitleText();
+    final current = item;
+    final lineParts = current is MediaItem ? _plezyListMetadataParts(current, catalogItem: catalogItem) : null;
+    final metadataStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: tokens(context).textMuted.withValues(alpha: 0.9),
+      fontSize: _metadataFontSize,
+      fontWeight: .w500,
+    );
 
     // List rows keep the whole-row border; inside stroke so adjacent rows
     // don't overlap.
@@ -947,17 +987,26 @@ class _MediaCardList extends StatelessWidget {
                         ),
                       ),
                     const SizedBox(height: 4),
-                    if (metadataLine.isNotEmpty) ...[
+                    if (lineParts != null) ...[
+                      if (lineParts.isNotEmpty) ...[
+                        ExcludeSemantics(
+                          child: FittedMetadataLine(
+                            textStyle: metadataStyle ?? TextStyle(fontSize: _metadataFontSize),
+                            parts: lineParts,
+                            ratingIconSize: _metadataFontSize,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                      ],
+                    ] else if (metadataLine.isNotEmpty) ...[
                       ExcludeSemantics(
-                        child: Text(
-                          metadataLine,
+                        // Plezy+: the own-rating star in amber (library items only;
+                        // catalog entries show their source's score).
+                        child: Text.rich(
+                          catalogItem == null ? starTintedSpan(metadataLine) : TextSpan(text: metadataLine),
                           maxLines: 1,
                           overflow: .ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: tokens(context).textMuted.withValues(alpha: 0.9),
-                            fontSize: _metadataFontSize,
-                            fontWeight: .w500,
-                          ),
+                          style: metadataStyle,
                         ),
                       ),
                       const SizedBox(height: 2),

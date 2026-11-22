@@ -25,7 +25,10 @@ class MediaFileInfo {
   /// Every version the server reports, in server order.
   final List<MediaFileVersion> versions;
 
-  const MediaFileInfo({this.versions = const []});
+  /// Plezy+: the item's labels (Plex `Label` tags), shown above the versions.
+  final List<String> labels;
+
+  const MediaFileInfo({this.versions = const [], this.labels = const []});
 }
 
 /// One playable version of an item: Plex `Media`, Jellyfin `MediaSources[]`.

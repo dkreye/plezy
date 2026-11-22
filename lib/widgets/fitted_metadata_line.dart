@@ -31,10 +31,19 @@ class MetadataLineText extends MetadataLinePart {
 /// "Japanese") with its own [detailDropPriority], so a tight line keeps the
 /// language and sheds the codec before it sheds the whole track.
 class MetadataLineIconText extends MetadataLinePart {
-  const MetadataLineIconText(this.icon, this.text, {required super.dropPriority, this.detail, int? detailDropPriority})
-    : detailDropPriority = detailDropPriority ?? dropPriority;
+  const MetadataLineIconText(
+    this.icon,
+    this.text, {
+    required super.dropPriority,
+    this.detail,
+    int? detailDropPriority,
+    this.iconColor,
+  }) : detailDropPriority = detailDropPriority ?? dropPriority;
 
   final IconData icon;
+
+  /// Glyph colour; defaults to the line's text colour.
+  final Color? iconColor;
   final String text;
   final String? detail;
   final int detailDropPriority;
@@ -185,10 +194,10 @@ class FittedMetadataLine extends StatelessWidget {
           if (children.isNotEmpty) children.add(Text(separator, maxLines: 1, style: textStyle));
           children.add(switch (parts[index]) {
             MetadataLineText(:final text) => Text(text, maxLines: 1, style: textStyle),
-            MetadataLineIconText(:final icon, :final text, :final detail) => Row(
+            MetadataLineIconText(:final icon, :final text, :final detail, :final iconColor) => Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                AppIcon(icon, size: iconSize, color: textStyle.color),
+                AppIcon(icon, size: iconSize, color: iconColor ?? textStyle.color, fill: iconColor == null ? null : 1),
                 const SizedBox(width: iconTextGap),
                 Text(
                   kept == 2 && detail != null ? '$text${MetadataLineIconText.detailSeparator}$detail' : text,

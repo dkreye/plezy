@@ -6,6 +6,7 @@ import '../media/media_item_types.dart';
 import '../media/media_kind.dart';
 import '../services/settings_service.dart';
 import '../theme/mono_tokens.dart';
+import '../utils/platform_detector.dart';
 import 'app_icon.dart';
 import 'media_progress_bar.dart';
 import 'unwatched_count_badge.dart';
@@ -14,10 +15,11 @@ import 'unwatched_count_badge.dart';
 /// [compact] for dense surfaces (folder tree rows, episode thumbnails).
 /// Add a preset here instead of hand-rolling a new overlay variant.
 enum WatchedIndicatorSize {
+  // Plezy+: checkmark 20 instead of 24 (TV: 15, see checkScale).
   standard(
     checkInset: 4,
-    checkPadding: 4,
-    checkIconSize: 16,
+    checkPadding: 3,
+    checkIconSize: 14,
     badgeSize: 24,
     badgeFontSize: 12,
     barRadius: 8,
@@ -85,21 +87,30 @@ class WatchedIndicator extends StatelessWidget {
       bottomRight: Radius.circular(size.barRadius),
     );
 
+    // Plezy+: on TV the artwork is large enough for a smaller checkmark that
+    // covers less of the poster (three quarters of the phone size).
+    final checkScale = PlatformDetector.isTV() ? 0.75 : 1.0;
+
     return Stack(
       children: [
         // Watched checkmark
         if (showWatched && item.isWatched && !hasActiveProgress)
           Positioned(
-            top: size.checkInset,
-            right: size.checkInset,
+            top: size.checkInset * checkScale,
+            right: size.checkInset * checkScale,
             child: Container(
-              padding: EdgeInsets.all(size.checkPadding),
+              padding: EdgeInsets.all(size.checkPadding * checkScale),
               decoration: BoxDecoration(
                 color: tokens(context).text,
                 shape: BoxShape.circle,
                 boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 4)],
               ),
-              child: AppIcon(Symbols.check_rounded, fill: 1, color: tokens(context).bg, size: size.checkIconSize),
+              child: AppIcon(
+                Symbols.check_rounded,
+                fill: 1,
+                color: tokens(context).bg,
+                size: size.checkIconSize * checkScale,
+              ),
             ),
           ),
         // Unwatched count for shows/seasons

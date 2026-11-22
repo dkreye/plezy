@@ -10,9 +10,13 @@ import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_person.dart';
 import '../media/media_server_client.dart';
+import '../services/plex_client.dart';
 import '../mixins/paginated_item_loader.dart';
 import '../mixins/standard_paginated_view.dart';
 import '../utils/app_logger.dart';
+import '../utils/platform_detector.dart';
+import '../utils/layout_constants.dart';
+import '../widgets/app_icon.dart';
 import '../utils/error_message_utils.dart';
 import '../utils/media_server_http_client.dart';
 import '../utils/provider_extensions.dart';
@@ -284,15 +288,70 @@ class _ActorMediaScreenState extends BaseMediaListDetailScreen<ActorMediaScreen>
         ),
         _buildActorHeader(),
         ...buildStateSlivers(),
-        if (hasItems)
-          buildSparseFocusableGrid(
-            totalItems: totalSize,
-            itemAt: (index) => loadedItems[index],
-            onRefresh: updateItem,
-            onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
-            onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
-          ),
+        if (hasItems) ..._buildFilmographySlivers(context),
       ],
     );
+  }
+
+  /// Plezy+: acting and crew roles as titled sections ("Besetzung", "Crew"),
+  /// each shown when it has entries; one untitled grid as before when the
+  /// split is unknown. Both grids share the screen's focus index space.
+  List<Widget> _buildFilmographySlivers(BuildContext context) {
+    final client = _mediaClientOrNull;
+    final castCount = client is PlexClient ? client.personCastCount(widget.personId) : null;
+    if (castCount == null || castCount > totalSize) {
+      return [
+        buildSparseFocusableGrid(
+          totalItems: totalSize,
+          itemAt: (index) => loadedItems[index],
+          onRefresh: updateItem,
+          onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
+          onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
+        ),
+      ];
+    }
+    // Same icons as the detail page's rows; on TV also the same size as its
+    // row headers (icon 20, text 18, both scaled).
+    final isTv = PlatformDetector.isTV();
+    final scale = isTv ? TvLayoutConstants.scaleForSize(MediaQuery.sizeOf(context)) : 1.0;
+    final titleStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
+      fontWeight: isTv ? FontWeight.w800 : null,
+      fontSize: isTv ? 18 * scale : null,
+    );
+    Widget title(String text, IconData icon) => SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: Row(
+          children: [
+            AppIcon(icon, fill: 1, size: isTv ? 20 * scale : 24),
+            SizedBox(width: 8 * scale),
+            Flexible(child: Text(text, style: titleStyle)),
+          ],
+        ),
+      ),
+    );
+    return [
+      if (castCount > 0) ...[
+        title(t.discover.cast, Symbols.group_rounded),
+        buildSparseFocusableGrid(
+          totalItems: castCount,
+          itemAt: (index) => loadedItems[index],
+          onRefresh: updateItem,
+          onSkeletonVisible: (index) => ensureIndexLoaded(index, pageSize: _pageSize),
+          onFirstRowNavigateUp: _biographyExpandable ? _focusBiography : null,
+        ),
+      ],
+      if (castCount < totalSize) ...[
+        title('Crew', Symbols.videocam_rounded),
+        buildSparseFocusableGrid(
+          totalItems: totalSize - castCount,
+          itemAt: (index) => loadedItems[castCount + index],
+          onRefresh: updateItem,
+          onSkeletonVisible: (index) => ensureIndexLoaded(castCount + index, pageSize: _pageSize),
+          onFirstRowNavigateUp: castCount == 0 && _biographyExpandable ? _focusBiography : null,
+          indexOffset: castCount,
+        ),
+      ],
+    ];
   }
 }

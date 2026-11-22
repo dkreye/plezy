@@ -114,7 +114,13 @@ MediaFileInfo? parsePlexFileInfoFromJson(Map<String, dynamic>? metadataJson) {
   final versions = <MediaFileVersion>[
     for (final media in mediaList) _plexFileVersion(Map<String, dynamic>.from(media)),
   ];
-  return MediaFileInfo(versions: versions);
+  return MediaFileInfo(
+    versions: versions,
+    labels: [
+      for (final label in _mapList(metadataJson?['Label']))
+        if ((label['tag']?.toString().trim() ?? '').isNotEmpty) label['tag'].toString().trim(),
+    ],
+  );
 }
 
 /// `Media.proxyType` value Plex uses for an optimized version.

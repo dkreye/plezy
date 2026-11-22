@@ -123,13 +123,21 @@ class MediaGridGeometry {
   final double itemWidth;
   final double itemHeight;
   final double spacing;
+
+  /// Plezy+: vertical gap between rows. Captioned cells get [captionRowGap]
+  /// on top of [spacing], so a caption sits visibly closer to its own artwork
+  /// than to the next row.
+  final double rowSpacing;
   final SliverGridDelegateWithMaxCrossAxisExtent delegate;
+
+  static const double captionRowGap = 8;
 
   const MediaGridGeometry._({
     required this.columnCount,
     required this.itemWidth,
     required this.itemHeight,
     required this.spacing,
+    required this.rowSpacing,
     required this.delegate,
   });
 
@@ -180,11 +188,14 @@ class MediaGridGeometry {
       shape: shape,
     );
 
+    final rowSpacing = fullBleedImage || PlatformDetector.isAutomotive() ? spacing : spacing + captionRowGap;
+
     return MediaGridGeometry._(
       columnCount: columnCount,
       itemWidth: itemWidth,
       itemHeight: itemHeight,
       spacing: spacing,
+      rowSpacing: rowSpacing,
       delegate: SliverGridDelegateWithMaxCrossAxisExtent(
         // When the column count is pinned to a different basis width, the
         // delegate must pack exactly [columnCount] columns into the real
@@ -192,7 +203,7 @@ class MediaGridGeometry {
         maxCrossAxisExtent: crossAxisExtentForColumnCount != null ? itemWidth : maxCrossAxisExtent,
         mainAxisExtent: itemHeight,
         crossAxisSpacing: spacing,
-        mainAxisSpacing: spacing,
+        mainAxisSpacing: rowSpacing,
       ),
     );
   }

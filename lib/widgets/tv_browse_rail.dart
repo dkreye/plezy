@@ -59,6 +59,9 @@ class TvBrowseRailLayoutMetrics {
   final double containerHeight;
   final double height;
 
+  /// Plezy+: space below the cards (unscaled), room for the focus scale-up.
+  final double bottomPadding;
+
   const TvBrowseRailLayoutMetrics({
     required this.isPersonHub,
     required this.isMixedHub,
@@ -72,6 +75,7 @@ class TvBrowseRailLayoutMetrics {
     required this.posterHeight,
     required this.containerHeight,
     required this.height,
+    this.bottomPadding = 18,
   });
 
   // Value equality: the metrics are recomputed every rail build and feed the
@@ -170,6 +174,7 @@ class TvBrowseRailLayout {
     double tallPosterScale = 1.0,
     double widePosterScale = 1.0,
     bool hasLeading = false,
+    double bottomPadding = 18,
   }) {
     final focusExtra = FocusTheme.focusBorderWidth * 2 * scale;
     final railEdgePadding = focusExtra + (12 * scale);
@@ -204,9 +209,10 @@ class TvBrowseRailLayout {
     final posterHeight = (isPersonHub || isSquareHub)
         ? posterWidth
         : (useWideLayout ? posterWidth * 9 / 16 : posterWidth * 1.5);
-    final labelHeight = fullCardLayout ? 0.0 : ((isPersonHub ? 52 : 36) * scale);
+    // Plezy+: person captions now match the poster captions, so the same band.
+    final labelHeight = fullCardLayout ? 0.0 : (36 * scale);
     final containerHeight = (posterHeight + labelHeight).ceilToDouble();
-    final height = containerHeight + focusExtra + (22 * scale);
+    final height = containerHeight + focusExtra + ((bottomPadding + 4) * scale);
 
     return TvBrowseRailLayoutMetrics(
       isPersonHub: isPersonHub,
@@ -221,6 +227,7 @@ class TvBrowseRailLayout {
       posterHeight: posterHeight,
       containerHeight: containerHeight,
       height: height,
+      bottomPadding: bottomPadding,
     );
   }
 
@@ -392,6 +399,10 @@ class TvBrowseRail extends StatefulWidget {
   final EpisodePosterMode Function(MediaHub hub)? episodePosterModeForHub;
   final double Function(MediaHub hub)? widePosterScaleForHub;
 
+  /// Plezy+: space below a hub's cards (unscaled, default 18), i.e. the gap
+  /// to the next hub's header.
+  final double Function(MediaHub hub)? railBottomPaddingForHub;
+
   /// Hubs whose episode cards belong to the show this rail sits under, so
   /// cards headline the episode title instead of the show name
   /// ([MediaCard.showTitleImplied]).
@@ -430,6 +441,7 @@ class TvBrowseRail extends StatefulWidget {
     this.autofocus = false,
     this.episodePosterModeForHub,
     this.widePosterScaleForHub,
+    this.railBottomPaddingForHub,
     this.showTitleImpliedForHub,
     this.backgroundBleedLeft,
   });
@@ -1272,6 +1284,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
                 tallPosterScale: widget.tallPosterScale,
                 widePosterScale: wideScales[i],
                 hasLeading: _hasLeadingFor(widget.hubs[i]),
+                bottomPadding: widget.railBottomPaddingForHub?.call(widget.hubs[i]) ?? 18,
               ),
           ];
           final sectionHeights = [
@@ -1694,7 +1707,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
         slivers: [
           if (leadingCount > 0)
             SliverPadding(
-              padding: .fromLTRB(metrics.railEdgePadding, 2 * scale, 0, 18 * scale),
+              padding: .fromLTRB(metrics.railEdgePadding, 2 * scale, 0, metrics.bottomPadding * scale),
               sliver: SliverToBoxAdapter(
                 child: Align(
                   alignment: .topLeft,
@@ -1709,7 +1722,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
             ),
           SliverPadding(
             key: centerSliverKey,
-            padding: .fromLTRB(metrics.railEdgePadding, 2 * scale, metrics.railEdgePadding, 18 * scale),
+            padding: .fromLTRB(metrics.railEdgePadding, 2 * scale, metrics.railEdgePadding, metrics.bottomPadding * scale),
             sliver: SliverFixedExtentList(
               // A fixed extent keeps all sliver offset and child-index math O(1).
               itemExtent: TvBrowseRailLayout.itemExtentForIndex(index: 0, metrics: metrics),
@@ -2016,27 +2029,24 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
                 ),
               ),
             ),
-            SizedBox(height: 6 * scale),
+            // Plezy+: caption exactly like the poster cards' (MediaCard grid
+            // caption): 2 below the artwork, title w600 13/1.1, caption
+            // 11/1.1 muted, no gap between the lines.
+            const SizedBox(height: 2),
             Text(
               item.displayTitle,
               maxLines: 1,
               overflow: .ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: tokens(context).text,
-                fontSize: 13 * scale,
-                height: 1.1,
-                fontWeight: .w700,
-              ),
+              style: TextStyle(color: tokens(context).text, fontSize: 13, height: 1.1, fontWeight: .w600),
             ),
             if (characterName != null && characterName.isNotEmpty) ...[
-              SizedBox(height: 2 * scale),
               Text(
                 characterName,
                 maxLines: 1,
                 overflow: .ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: tokens(context).textMuted,
-                  fontSize: 11 * scale,
+                  fontSize: 11,
                   height: 1.1,
                 ),
               ),

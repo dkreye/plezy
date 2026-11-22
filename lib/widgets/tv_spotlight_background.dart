@@ -1,11 +1,15 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '../i18n/strings.g.dart';
 import '../media/media_item.dart';
 import '../media/media_item_types.dart';
+import '../media/media_rating.dart';
 import '../media/media_server_client.dart';
 import '../services/device_performance.dart';
 import '../utils/content_utils.dart';
@@ -321,6 +325,22 @@ class TvSpotlightBackground extends StatelessWidget {
   }
 
   Widget _buildMetadataLine(BuildContext context, MediaItem media) {
+    // Plezy+: listings carry only the scalar rating pair, which tools such as
+    // Kometa may have rewritten. The focused item's full record supplies the
+    // attributed Rating[] list instead, as on the detail screen.
+    final c = client;
+    if (c == null || !allowNetwork || !(media.isMovie || media.isShow || media.isEpisode)) {
+      return _buildMetadataLineWith(context, media, null);
+    }
+    return _FullRatings(
+      key: ValueKey(media.globalKey),
+      media: media,
+      client: c,
+      builder: (context, full) => _buildMetadataLineWith(context, media, full),
+    );
+  }
+
+  Widget _buildMetadataLineWith(BuildContext context, MediaItem media, List<MediaRatingSource>? fullRatings) {
     final scale = _scale(context);
     final colorScheme = Theme.of(context).colorScheme;
     final episodeLabel = formatSeasonEpisodeLabel(media.parentIndex, media.index);
@@ -338,22 +358,29 @@ class TvSpotlightBackground extends StatelessWidget {
     } else if (media.isShow) {
       parts.add(MetadataLineText(t.discover.tvShow, dropPriority: 3));
     }
-    // Hub listings carry the scalar rating pair, so the dashboard spotlight
-    // shows every score the shelf request already returned — no per-item
-    // hydration to lengthen it.
-    final ratings = mediaRatingsFor(media);
-    if (ratings.isNotEmpty) parts.add(MetadataLineRatings(ratings, dropPriority: 4));
+    // Plezy+: same order as the detail line: date/year, age rating,
+    // runtime, own rating (amber star, 0-10), scores.
+    if (media.isEpisode && media.originallyAvailableAt != null) {
+      parts.add(MetadataLineText(formatFullDate(media.originallyAvailableAt!), dropPriority: 0));
+    } else if (media.year != null) {
+      parts.add(MetadataLineText(media.year.toString(), dropPriority: 0));
+    }
     if (media.contentRating != null) {
       parts.add(MetadataLineText(formatContentRating(media.contentRating!), dropPriority: 2));
     }
     if (media.durationMs != null) {
       parts.add(MetadataLineText(formatDurationTextual(media.durationMs!), dropPriority: 1));
     }
-    if (media.isEpisode && media.originallyAvailableAt != null) {
-      parts.add(MetadataLineText(formatFullDate(media.originallyAvailableAt!), dropPriority: 0));
-    } else if (media.year != null) {
-      parts.add(MetadataLineText(media.year.toString(), dropPriority: 0));
+    final userRating = media.userRating;
+    if (userRating != null && userRating > 0) {
+      parts.add(
+        MetadataLineIconText(Symbols.star_rounded, formatRating(userRating), dropPriority: 0, iconColor: Colors.amber),
+      );
     }
+    // Until the full record arrives no scores are shown, so the listing's
+    // possibly wrong scalar pair never flashes up first.
+    final ratings = fullRatings ?? const <MediaRatingSource>[];
+    if (ratings.isNotEmpty) parts.add(MetadataLineRatings(ratings, dropPriority: 4));
 
     final line = parts.isEmpty
         ? null
@@ -392,4 +419,55 @@ class TvSpotlightBackground extends StatelessWidget {
   double _metadataFontSize(double scale) => (compact ? 16 : 18) * scale;
 
   double _summaryFontSize(double scale) => (compact ? 18 : 20) * scale;
+}
+
+/// Plezy+: loads the focused item's full record once the focus has rested
+/// briefly and hands its attributed scores to [builder]; `null` until then.
+/// Results are kept per item so moving back and forth costs no new requests.
+class _FullRatings extends StatefulWidget {
+  const _FullRatings({super.key, required this.media, required this.client, required this.builder});
+
+  final MediaItem media;
+  final MediaServerClient client;
+  final Widget Function(BuildContext context, List<MediaRatingSource>? ratings) builder;
+
+  static final Map<String, List<MediaRatingSource>> _cache = {};
+
+  @override
+  State<_FullRatings> createState() => _FullRatingsState();
+}
+
+class _FullRatingsState extends State<_FullRatings> {
+  List<MediaRatingSource>? _ratings;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    final key = widget.media.globalKey;
+    _ratings = _FullRatings._cache[key];
+    if (_ratings == null) _timer = Timer(const Duration(milliseconds: 350), () => _load(key));
+  }
+
+  Future<void> _load(String key) async {
+    try {
+      final full = await widget.client.fetchItem(widget.media.id);
+      final ratings = full == null ? const <MediaRatingSource>[] : mediaRatingsFor(full);
+      if (_FullRatings._cache.length > 300) _FullRatings._cache.clear();
+      _FullRatings._cache[key] = ratings;
+      if (mounted) setState(() => _ratings = ratings);
+    } catch (_) {
+      // Network trouble: fall back to the listing's own scores.
+      if (mounted) setState(() => _ratings = mediaRatingsFor(widget.media));
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _ratings);
 }
