@@ -400,6 +400,54 @@ mixin _PlexCollectionMethods on _PlexClientInternals {
     return [...cast, ...crew];
   }
 
+  /// Plezy+: a show's crew from its episodes. The episode list carries the
+  /// names only, so ids and photos come from the full records of one episode
+  /// per person, fetched in a single request.
+  Future<List<Map<String, Object?>>> fetchShowCrew(String showId, {int limit = 20}) async {
+    const fields = [('Director', 'director'), ('Writer', 'writer')];
+    final response = await _getWithFailover('/library/metadata/$showId/allLeaves');
+    final firstEpisode = <String, String>{};
+    final credits = <List<EpisodeCrewCredit>>[];
+    for (final episode in flexibleMapList(_getMediaContainer(response)?['Metadata'])) {
+      final key = episode['ratingKey']?.toString();
+      final episodeCredits = <EpisodeCrewCredit>[];
+      for (final (field, job) in fields) {
+        for (final tag in flexibleMapList(episode[field])) {
+          final name = tag['tag']?.toString().trim() ?? '';
+          if (name.isEmpty) continue;
+          episodeCredits.add((name: name, job: job, id: null, thumb: null));
+          if (key != null) firstEpisode.putIfAbsent(name, () => key);
+        }
+      }
+      credits.add(episodeCredits);
+    }
+    final crew = showCrewFromEpisodes(credits, limit: limit);
+
+    // Ids and photos from one full episode record per person, one request.
+    final tags = <String, Map<String, dynamic>>{};
+    final names = {for (final c in crew) c['tag'] as String};
+    final missing = {for (final name in names) if (firstEpisode[name] != null) firstEpisode[name]!};
+    if (missing.isNotEmpty) {
+      try {
+        final full = await _getWithFailover('/library/metadata/${missing.join(',')}');
+        for (final episode in flexibleMapList(_getMediaContainer(full)?['Metadata'])) {
+          for (final (field, _) in fields) {
+            for (final tag in flexibleMapList(episode[field])) {
+              final name = tag['tag']?.toString().trim() ?? '';
+              if (names.contains(name)) tags.putIfAbsent(name, () => tag);
+            }
+          }
+        }
+      } catch (e) {
+        appLogger.w('Plezy+: show crew details failed', error: e);
+      }
+    }
+    return [
+      for (final c in crew)
+        {...c, 'id': tags[c['tag']]?['id']?.toString(), 'thumb': tags[c['tag']]?['thumb']?.toString()},
+    ];
+  }
+
   /// Plezy+: per person id, how many entries of the merged filmography are
   /// acting roles; they come first, the crew roles after them.
   final Map<String, int> _plezyPersonCastCount = {};

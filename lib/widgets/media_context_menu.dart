@@ -12,6 +12,7 @@ import '../media/media_item_types.dart';
 import '../media/media_kind.dart';
 import '../media/media_playlist.dart';
 import '../media/media_server_client.dart';
+import '../media/plezy_plus.dart';
 import '../metadata_edit/metadata_edit_adapters.dart';
 import '../metadata_edit/metadata_edit_models.dart';
 import '../services/plex_client.dart';
@@ -668,6 +669,13 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         ),
         if (!isUnmatched) _MenuAction(value: 'unmatch', icon: Symbols.link_off_rounded, label: t.matchScreen.unmatch),
       ],
+      // Plezy+: refresh one item's metadata, on every backend that can; the
+      // same admin gate as Edit Metadata (servers refuse it for others).
+      if (menu.isAdmin &&
+          menu.itemServerOnline &&
+          menu.mediaClient is ItemMetadataRefreshClient &&
+          (isMovieOrShow || mediaKind == MediaKind.season || mediaKind == MediaKind.episode))
+        _MenuAction(value: 'refresh_metadata', icon: Symbols.refresh_rounded, label: t.libraries.refreshMetadata),
       // Remove from Collection (only when viewing items within a collection).
       // Every backend implements `removeFromCollection`.
       if (widget.collectionId != null && menu.canManageCollections)
@@ -923,6 +931,9 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       case 'unmatch':
         await _handleUnmatch(context, mediaItem);
         break;
+      case 'refresh_metadata':
+        await _handleRefreshMetadata(context, mediaItem);
+        break;
       case 'remove_from_collection':
         await _handleRemoveFromCollection(context, mediaItem);
         break;
@@ -1170,6 +1181,23 @@ class MediaContextMenuState extends State<MediaContextMenu> {
   bool _isUnmatched(MediaItem item) {
     final g = item.guid;
     return g == null || g.isEmpty || g.contains('agents.none://');
+  }
+
+  /// Plezy+: queue a metadata refresh of [item]. The server works in the
+  /// background, so the item shows the new data on its next load.
+  Future<void> _handleRefreshMetadata(BuildContext context, MediaItem item) async {
+    final client = _getMediaClientForItem();
+    if (client is! ItemMetadataRefreshClient) return;
+    final title = item.title ?? '';
+    try {
+      await (client as ItemMetadataRefreshClient).refreshItemMetadata(item.id);
+      if (context.mounted) showSuccessSnackBar(context, t.messages.metadataRefreshStarted(title: title));
+    } catch (e) {
+      appLogger.w('Metadata refresh failed for ${item.id}', error: e);
+      if (context.mounted) {
+        showErrorSnackBar(context, t.messages.metadataRefreshFailed(error: localizedErrorReason(e)));
+      }
+    }
   }
 
   Future<void> _handleUnmatch(BuildContext context, MediaItem item) async {

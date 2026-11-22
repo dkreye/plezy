@@ -11,6 +11,7 @@
 // The client wraps the static methods with per-instance image-URL
 // resolution and server-tagging.
 
+import '../media/plezy_plus.dart';
 import 'package:json_annotation/json_annotation.dart';
 import '../media/chapter_marker_classifier.dart';
 import '../media/artist_discography.dart';
@@ -1007,7 +1008,7 @@ class PlexMetadataDto {
 }
 
 /// Plezy+: [MediaItem.raw] key of the crew list (see [PlexMetadataDto.crew]).
-const String plexCrewRawKey = 'plezyCrew';
+const String plexCrewRawKey = mediaCrewRawKey;
 
 /// Plezy+: [MediaItem.raw] key of [PlexMetadataDto.nfoPeople].
 const String plexNfoPeopleRawKey = 'plezyNfoPeople';
